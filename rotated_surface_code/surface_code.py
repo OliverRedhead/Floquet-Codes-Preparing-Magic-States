@@ -114,7 +114,8 @@ class Zancilla(Qubit):
     def set_schedule(self, data_qubits: list[Qubit]) -> None:
         """
         Schedule setter method. 
-        This uses the relative schedule coords in self.schedule_coords to pick out the respective data qubits and store them within this instance to be used later.
+        This uses the relative schedule coords in self.schedule_coords to pick out the respective data 
+        qubits and store them within this instance to be used later.
 
         Parameters
         ----------
@@ -146,7 +147,8 @@ class Xancilla(Qubit):
     def set_schedule(self, data_qubits: list[Qubit]):
         """
         Schedule setter method. 
-        This uses the relative schedule coords in self.schedule_coords to pick out the respective data qubits and store them within this instance to be used later.
+        This uses the relative schedule coords in self.schedule_coords to pick out the respective data qubits 
+        and store them within this instance to be used later.
 
         Parameters
         ----------

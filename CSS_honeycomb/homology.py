@@ -21,7 +21,7 @@ class nCell(ABC):
 
     n = None
 
-    def __init__(self, id, colour : str | None = None) -> None:
+    def __init__(self, id) -> None:
         """
         Initialise nCell instance.
 
@@ -30,12 +30,8 @@ class nCell(ABC):
         id : hashable
             should be something hashable and unique within a dimension. I imagine we will mostly be using unique integer
             identifiers.
-        colour : str = 'red', 'green' or 'blue'
         """
         self.id = id
-        if colour is not None and colour not in ['red', 'green', 'blue']:
-            raise ValueError(f"nCell colour must be `None` or 'red', 'green' or 'blue'; not {colour}")
-        self.colour = colour
         # initialise empty coboundary list
         self.coboundary_cells: set[nCell] = set()
 
@@ -69,13 +65,7 @@ class ZeroCell(nCell):
     n = 0
 
     def __init__(self, id) -> None:
-        """
-        Initialise 0-cell instance.
-
-        Notes
-        -----
-        - `colour` is unspecified and takes default value `None`. Vertices have no colour
-        """
+        """Initialise 0-cell instance."""
         super().__init__(id)
             
     def boundary(self) -> None:
@@ -99,7 +89,7 @@ class OneCell(nCell):
 
     n = 1
     
-    def __init__(self, id, v0: ZeroCell, v1: ZeroCell, colour: str) -> None:
+    def __init__(self, id, v0: ZeroCell, v1: ZeroCell) -> None:
         """
         Initialise 1-Cell instance (edge). An edge is defined by the vertices it connects.
         While initialising we set up the coboundary maps of the vertices
@@ -112,10 +102,8 @@ class OneCell(nCell):
             A ZeroCell (vertex) that defines one end of this edge
         v1 : ZeroCell
             The other ZeroCell (vertex) that defines the other end of this edge
-        colour : str = 'red', 'green' or 'blue'
-            The colour of this edge
         """
-        super().__init__(id, colour)
+        super().__init__(id)
         self.vertices = (v0, v1)
         v0.coboundary_cells.add(self)
         v1.coboundary_cells.add(self)
@@ -133,7 +121,7 @@ class OneCell(nCell):
         NOTE This will need to be setup when we construct the relevant 2-cell.
         """
         return TwoChain(self.coboundary_cells)
-    
+      
 class TwoCell(nCell):
     """
     In our case, 2-cell is a plaquette
@@ -141,7 +129,7 @@ class TwoCell(nCell):
 
     n = 2
 
-    def __init__(self, id, edges: list[OneCell], colour: str) -> None:
+    def __init__(self, id, edges: list[OneCell]) -> None:
         """
         Initialise TwoCell (plaquette) defined by its edges.
 
@@ -151,10 +139,8 @@ class TwoCell(nCell):
             Unique identifier for this plaquette, should be consistent will other plaquettes
         edges : list[OneCell]
             Edges that define this plaquette
-        colour : str = 'red', 'green' or 'blue'
-            Colour of this plaquette
         """
-        super().__init__(id, colour)
+        super().__init__(id)
         self.edges = tuple(edges)
         for e in edges:
             e.coboundary_cells.add(self)
@@ -214,6 +200,9 @@ class nChain(ABC):
 
     def __repr__(self) -> str:
         return f"{type(self).__name__}({set(self.cells)})"
+    
+    def __iter__(self):
+        return iter(self.cells)
 
     @abstractmethod
     def boundary(self):
@@ -236,6 +225,7 @@ class ZeroChain(nChain):
         for c in self.cells:
             result = result + c.coboundary()
         return result
+
 
 class OneChain(nChain):
 
@@ -277,10 +267,10 @@ if __name__ == "__main__":
     verts = [ZeroCell(i) for i in range(6)]
 
     # six edges connecting them in a cycle
-    edges = [OneCell(i, verts[i], verts[(i + 1) % 6], colour='red') for i in range(6)]
+    edges = [OneCell(i, verts[i], verts[(i + 1) % 6]) for i in range(6)]
 
     # one face bounded by all six edges
-    face = TwoCell("hex0", edges, colour='red')
+    face = TwoCell("hex0", edges)
 
     face_chain = TwoChain({face})
     edge_boundary = face_chain.boundary()

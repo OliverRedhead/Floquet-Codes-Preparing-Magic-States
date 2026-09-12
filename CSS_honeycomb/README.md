@@ -30,3 +30,16 @@ I can see some tweaks required for this class, but by in large I think it's stru
    - I find it easier to start with the triangular superlattice and place cells given that, might use this to initialise everything. 
   
 Still lots of work to do and lots of problems I havn't worked out how to solve, but this does give a solid starting point that should apply pretty generally.
+
+## 12/9/26
+I have done a bit of work on our Surface class today, we can now set up a circuit! I am trying to implement methods to visualise things as I go and make sure everything is working properly. The main things I have done today
+   - Vertex, edge and plaquette classes to hold colours and coordinates with some helpful getter methods that really will help with our operations
+   - Initialisation methods in the Surface class to set up a hexagonal surface. I am using 'square coordinates' to set things up (they are much easier to find patterns in and allow us to use binary operations) and then I have written a map method which takes us from the square coords to the hexagonal coords. It may be useful to think in both systems so it will be nice to be able to move between them.
+   - Once the homology was set up it was pretty easy to add some visualisation methods which draw our surface using matplotlib, this may be helpful for debugging and making sure things are where they are supposed to be. 
+   - I started making sure we can use our homology properties to easily apply operations. We can! It is really easy to measure the qubits on red edges for example. Hopefully we can automate the application of gates and things too. 
+
+**Some things to implement and worry about:**
+   - Detectors and operation classes. Last year I had a set of classes for the operations. I'm not sure if we want to do the same thing, or just keep track of things a different way. I found that because of the way that detectors are indexed in stim they are some of the most difficult operations to work with (and some of the most important!). Last year I overcame this by just holding onto a record of all measurements in the circuit and having to call on that every time I wanted to place a detector.
+   - Boundary Conditions. Honestly in writing this I havn't looked much at how we consider our boundaries, but it it obviously something we need to work out and something I havn't considered when writing this.
+   - Qubit indices in visualisation methods. Should be able to label vertices by their id to help with debugging
+   - Ancilla qubits. For heavy hex (not sure about phenomenological model) we will have ancillas on the "heavy" part of our hexagons. Then we apply cnots to flow stabilizers into measurements. This should actually be relatively easy with our homology tools!

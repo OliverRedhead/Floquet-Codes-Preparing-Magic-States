@@ -1,8 +1,8 @@
-from rotated_bridge.qubit import Qubit, Data, Bridge, Syndrome, SyData
+from heavy_hex.qubit import Qubit, Data, Bridge, Syndrome, SyData
 import numpy as np
-from rotated_bridge.gates import Hadamard, Cnot, Measurement, Reset, Gate
-from rotated_bridge.helpers import clean_gate_list, find_measurement
-from rotated_bridge.hexagon import Hexagon
+from heavy_hex.gates import Hadamard, Cnot, Measurement, Reset, Gate
+from heavy_hex.helpers import clean_gate_list, find_measurement
+from heavy_hex.hexagon import Hexagon
 import stim
 
 
