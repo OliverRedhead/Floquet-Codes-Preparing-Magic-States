@@ -8,7 +8,8 @@ superlattice of the triangular toric code easier.
 """
 
 from abc import ABC, abstractmethod
-
+from collections.abc import Sequence
+from typing import Iterator
 
 class nCell(ABC):
     """
@@ -49,12 +50,12 @@ class nCell(ABC):
     """
 
     @abstractmethod
-    def boundary(self) -> nChain | None:
-        pass
+    def boundary(self):
+        raise NotImplementedError
 
     @abstractmethod
-    def coboundary(self) -> nChain | None:
-        pass
+    def coboundary(self):
+        raise NotImplementedError
     
 
 class ZeroCell(nCell):
@@ -129,7 +130,7 @@ class TwoCell(nCell):
 
     n = 2
 
-    def __init__(self, id, edges: list[OneCell]) -> None:
+    def __init__(self, id, edges: Sequence[OneCell]) -> None:
         """
         Initialise TwoCell (plaquette) defined by its edges.
 
@@ -137,10 +138,15 @@ class TwoCell(nCell):
         ----------
         id : hashable
             Unique identifier for this plaquette, should be consistent will other plaquettes
-        edges : list[OneCell]
-            Edges that define this plaquette
+        edges : Sequence[OneCell] | None
+            edges that define this plaquette
+
+        Notes
+        -----
+        - Not sure about calling them edges and plaquettes here, 
+            maybe for consistency should rename some stuff.
         """
-        super().__init__(id)
+        super().__init__(id)        
         self.edges = tuple(edges)
         for e in edges:
             e.coboundary_cells.add(self)
@@ -167,7 +173,7 @@ class nChain(ABC):
 
     n = None
 
-    def __init__(self, cells) -> None:
+    def __init__(self, cells=()) -> None:
         """
         Initialise nChain instance.
 
@@ -179,8 +185,15 @@ class nChain(ABC):
         self.cells = frozenset(cells)
 
     def __add__(self, other):
+
         if not isinstance(other, nChain):
             return NotImplemented
+
+        if self.n != other.n:
+            raise TypeError(
+                f"cannot add {type(self).__name__} and {type(other).__name__}"
+            )
+
         return type(self)(self.cells.symmetric_difference(other.cells))
     
     def __radd__(self, other):
@@ -201,7 +214,7 @@ class nChain(ABC):
     def __repr__(self) -> str:
         return f"{type(self).__name__}({set(self.cells)})"
     
-    def __iter__(self):
+    def __iter__(self) -> Iterator[nCell]:
         return iter(self.cells)
 
     @abstractmethod
@@ -225,7 +238,6 @@ class ZeroChain(nChain):
         for c in self.cells:
             result = result + c.coboundary()
         return result
-
 
 class OneChain(nChain):
 
