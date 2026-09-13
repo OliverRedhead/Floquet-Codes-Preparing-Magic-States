@@ -7,6 +7,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from homology import ZeroCell, OneCell, TwoCell, ZeroChain, OneChain, TwoChain
 from qubit import Qubit
+from collections.abc import Sequence
 
 class Vertex(ZeroCell):
 
@@ -54,6 +55,9 @@ class Edge(OneCell):
     """
 
     def __init__(self, id, v0: Vertex, v1: Vertex, colour: str) -> None:
+        if not isinstance(v0, Vertex) or not isinstance(v1, Vertex):
+            raise ValueError(f"Edge must be handed two `Vertex` instances, not v0: {type(v0)} and v1: {type(v1)}")
+
         super().__init__(id, v0, v1)
         if colour not in ['red', 'green', 'blue']:
             raise ValueError(f"`colour` must be 'red', 'green', 'blue', not {colour}")
@@ -62,7 +66,7 @@ class Edge(OneCell):
     def get_coordinates(self):
         """return coordinates of the vertices that make up this edge as tuple"""
         v0, v1 = self.boundary()
-        return (v0.pos, v1.pos)
+        return (v0.pos, v1.pos) # type: ignore
     
     def get_indices(self):
         v0, v1 = self.boundary()
@@ -76,19 +80,101 @@ class Plaquette(TwoCell):
     A plaquette does have a colour.
     """
 
-    def __init__(self, id, edges: list[Edge], colour: str) -> None:
+    def __init__(
+        self,
+        id,
+        colour: str,
+        *,
+        edges: Sequence[Edge] | None = None,
+        vertices: Sequence[Vertex] | None = None
+    ) -> None:
+
+        if vertices is not None:
+
+            if edges is not None:
+                raise ValueError(
+                    "You have specified both edges and vertices, "
+                    "must only specify one or the other."
+                )
+
+            vertex_set = set(vertices)
+
+            # Collect every edge incident to at least one supplied vertex
+            candidate_edges = {
+                edge
+                for vertex in vertices
+                for edge in vertex.coboundary()
+                if isinstance(edge, Edge)
+            }
+
+            # Keep only edges whose two endpoints are both in the plaquette
+            edges = tuple(
+                edge
+                for edge in candidate_edges
+                if all(v in vertex_set for v in edge.vertices)
+            )
+
+        elif edges is None:
+            raise ValueError(
+                "cannot have edges and vertices None; "
+                "must specify one or the other."
+            )
+
         super().__init__(id, edges)
-        if colour not in ['red', 'green', 'blue']:
-            raise ValueError(f"`colour` must be 'red', 'green', 'blue', not {colour}")
+
+        if colour not in ["red", "green", "blue"]:
+            raise ValueError(
+                f"`colour` must be 'red', 'green', 'blue', not {colour}"
+            )
+
         self.colour = colour
 
     def __str__(self):
         return f"Plaquette({self.id}) {self.colour}"
 
-    def get_coordinates(self):
-        """return coordinates of the vertices that make up this edge as tuple of complex numbers"""
-        vertices = self.boundary()
-        return (v.pos for v in vertices)
+    def get_coordinates(
+        self,
+        ordered = False
+    ) -> tuple[tuple[float, float], ...]:
+
+        """Return coordinates of the unique vertices making up these edges.
+
+        Parameters
+        ----------
+        order : bool = False
+            If specified, order the vertices around their centre.
+        """
+
+        edges = self.boundary()
+
+        vertices = {
+            v
+            for edge in edges
+            for v in edge.boundary()
+        }
+
+        coords = np.array(
+            [v.pos for v in vertices],
+            dtype=float
+        )
+
+        if ordered is False:
+            return tuple(map(tuple, coords))
+
+        # Centre of the vertices
+        centre = coords.mean(axis=0)
+
+        # Angle of each vertex relative to the centre
+        angles = np.arctan2(
+            coords[:, 1] - centre[1],
+            coords[:, 0] - centre[0]
+        )
+
+        # Increasing angle = anticlockwise
+        indices = np.argsort(angles)
+        coords = coords[indices]
+
+        return tuple(map(tuple, coords))
     
 
 
@@ -134,21 +220,21 @@ class Surface:
         self.edges = self.__initialise_edges()
         self.plaquettes = self.__initialise_plaquettes()
 
-    def __initialise_vertices(self):
+    def __initialise_vertices(self) -> tuple[list[tuple[int, int]], list[Vertex]]:
         """Initialise vertices, note that data qubits are initialised in this step too"""
-        coords = np.array([
+        coords = [
             (x, y)
             for y in range(self.nrows) 
             for x in range(self.ncols)
-            ])
+            ]
         
-        vertices = np.array([
+        vertices = [
             Vertex(i, pos) 
             for i, pos in enumerate(coords)
-            ])
+            ]
         return coords, vertices
 
-    def __initialise_edges(self):
+    def __initialise_edges(self) -> list[Edge]:
         """
         Initialise edges, needs to be called after vertices are initialised.
         An edge is defined by the two vertices it joins.
@@ -169,7 +255,7 @@ class Surface:
                 edges.append(make_edge(edges, v0, self.vertices[i + 1]))
         return edges
 
-    def __initialise_plaquettes(self):
+    def __initialise_plaquettes(self) -> list[Plaquette]:
         """
         Initialise plaquettes, needs to be called after vertices are initialised.
         A plaquette is built starting from the qubit in the top left (closest to (0,0)).
@@ -191,8 +277,8 @@ class Surface:
 
                 plaquette = Plaquette(
                     len(plaquettes),
-                    [v0, v1, v2, v3, v4, v5],
-                    colour=Surface.__colour_plaquette(y)
+                    colour=Surface.__colour_plaquette(y),
+                    vertices=[v0, v1, v2, v3, v4, v5]
                 )
 
                 plaquettes.append(plaquette)
@@ -221,6 +307,9 @@ class Surface:
         return string
 
     def measure_edges(self, colour, flavour="Z"):
+        """
+        We can pick out all the edges of a certain colour and measure them easily
+        """
         string = f"M{flavour} "
         target_edges = [e for e in self.edges if e.colour == colour]
         target_qubits = [e.get_indices() for e in target_edges]
@@ -253,10 +342,19 @@ class Surface:
 
     @staticmethod
     def square_to_hex(coords, scale=1):
+
+        coords = np.asarray(coords, dtype=float)
+
+        # Make sure we have an (N, 2) array
+        if coords.ndim != 2 or coords.shape[1] != 2:
+            raise ValueError(
+                f"coordinates must have shape (N, 2), got {coords.shape}"
+            )
+
         a = np.sqrt(3) / 4
 
-        x = coords[:, 0].astype(float)
-        y = coords[:, 1].astype(float)
+        x = coords[:, 0].copy()
+        y = coords[:, 1].copy()
 
         even = (y % 2 == 0)
 
@@ -304,6 +402,7 @@ class Surface:
 
         return np.array(square_coords)
     
+
     """
     visualisation methods
     """
@@ -314,28 +413,29 @@ class Surface:
         'blue' : '#3498db', 
                }
 
-    def plot_surface(self, coordinates='square'):
-        """to visualise things"""
+    def plot_surface(self, coordinates="square"):
 
-        if coordinates == 'square':
+        """Visualise the surface."""
+
+        if coordinates == "square":
+
             def coord_map(x):
-                return x
+                return np.asarray(x, dtype=float)
+
+        elif coordinates == "hex":
+            coord_map = self.square_to_hex
+
         else:
-            coord_map = Surface.square_to_hex
-
-
-        for p in self.plaquettes:
-            p_coords = coord_map(np.array(list(p.get_coordinates())))
-
-            # Order vertices around the centre of the plaquette
-            centre = p_coords.mean(axis=0)
-
-            angles = np.arctan2(
-                p_coords[:, 1] - centre[1],
-                p_coords[:, 0] - centre[0]
+            raise ValueError(
+                f"`coordinates` must be 'square' or 'hex', not {coordinates!r}"
             )
 
-            p_coords = p_coords[np.argsort(angles)]
+        # Plaquettes
+        for p in self.plaquettes:
+
+            p_coords = coord_map(
+                np.asarray(p.get_coordinates(ordered=True), dtype=float)
+            )
 
             plt.fill(
                 p_coords[:, 0],
@@ -345,15 +445,34 @@ class Surface:
                 edgecolor="black",
                 zorder=1
             )
-        
+
+        # Edges
         for e in self.edges:
-            e_coords = coord_map(np.array(e.get_coordinates()))
-            plt.plot(e_coords[:, 0], e_coords[:, 1], "-", c=Surface.PALETTE[e.colour], zorder=2)
 
-        mapped_coords = coord_map(self.coords)
-        plt.scatter(mapped_coords[:, 0], mapped_coords[:, 1], c='black', zorder=3)
-            
+            e_coords = coord_map(
+                np.asarray(e.get_coordinates(), dtype=float)
+            )
 
-        plt.axis('equal') 
+            plt.plot(
+                e_coords[:, 0],
+                e_coords[:, 1],
+                "-",
+                c=Surface.PALETTE[e.colour],
+                zorder=2
+            )
+
+        # Vertices
+        mapped_coords = coord_map(
+            np.asarray(self.coords, dtype=float)
+        )
+
+        plt.scatter(
+            mapped_coords[:, 0],
+            mapped_coords[:, 1],
+            c="black",
+            zorder=3
+        )
+
+        plt.axis("equal")
         plt.gca().yaxis.set_inverted(True)
         plt.show()
