@@ -43,3 +43,6 @@ I have done a bit of work on our Surface class today, we can now set up a circui
    - Boundary Conditions. Honestly in writing this I havn't looked much at how we consider our boundaries, but it it obviously something we need to work out and something I havn't considered when writing this.
    - Qubit indices in visualisation methods. Should be able to label vertices by their id to help with debugging
    - Ancilla qubits. For heavy hex (not sure about phenomenological model) we will have ancillas on the "heavy" part of our hexagons. Then we apply cnots to flow stabilizers into measurements. This should actually be relatively easy with our homology tools!
+# 14/9/26
+   - fixed an error in the Plaquette initialisation that initialised it with vertices rather than edges. Thought it would be better to restructure some of the other classes like TwoCell. Can now initialise a Plaquette given its edges or vertices
+      - **TODO** Want to be able to compute vertices if given set of edges, that way we can easily use either.

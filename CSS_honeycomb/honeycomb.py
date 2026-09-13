@@ -121,6 +121,8 @@ class Plaquette(TwoCell):
             )
 
         super().__init__(id, edges)
+        # TODO need to compute vertices if given edges:
+        # self.vertices = OneChain(vertices)
 
         if colour not in ["red", "green", "blue"]:
             raise ValueError(
@@ -423,7 +425,7 @@ class Surface:
                 return np.asarray(x, dtype=float)
 
         elif coordinates == "hex":
-            coord_map = self.square_to_hex
+            coord_map = self.square_to_hex # type: ignore
 
         else:
             raise ValueError(
