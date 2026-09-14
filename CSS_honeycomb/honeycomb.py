@@ -44,17 +44,17 @@ class Vertex(ZeroCell):
         - vertex key and qubit key **must** match, else we will have problems with stim.
 
         """
-        assert isinstance(id, int | None)
+        assert isinstance(key, (int, type(None))), f"Vertex.key must be `int` or `None`. Not {type(key)}"
     
     
         # qubit key must be integer in stim
-        if not isinstance(id, int): 
-            raise ValueError(f"id must be `int` not {type(id).__name__}")
+        if not isinstance(key, int): 
+            raise ValueError(f"key must be `int` not {type(key).__name__}")
         
         # qubit must have same key as this Vertex
         if isinstance(qubit, Qubit): 
-            assert qubit.key == key, f"""`Vertex.key` and `Vertex.qubit.key` must match. 
-                                        Cannot have vertex.key={id}, qubit.key={qubit.key}"""
+            assert qubit.key == key, f"""Vertex.key and Vertex.qubit.key must match. 
+                                        Cannot have vertex.key={key}, qubit.key={qubit.key}"""
             self.qubit = qubit
 
         elif qubit is None:
@@ -65,7 +65,7 @@ class Vertex(ZeroCell):
         
         self.pos = pos
 
-        super().__init__(id)
+        super().__init__(key)
 
     def get_coordinates(self):
         """return coordinates of this vertex as tuple"""
@@ -84,7 +84,7 @@ class Edge(OneCell):
         if not isinstance(v0, Vertex) or not isinstance(v1, Vertex):
             raise ValueError(f"Edge must be handed two `Vertex` instances, not v0: {type(v0)} and v1: {type(v1)}")
 
-        super().__init__(id, v0, v1)
+        super().__init__(key, v0, v1)
         if colour not in ['red', 'green', 'blue']:
             raise ValueError(f"`colour` must be 'red', 'green', 'blue', not {colour}")
         self.colour = colour
@@ -162,7 +162,7 @@ class Plaquette(TwoCell):
                 "must specify one or the other."
             )
 
-        super().__init__(id, edges)
+        super().__init__(key, edges)
         self.vertices = OneChain(vertices)
 
         if colour not in ["red", "green", "blue"]:

@@ -15,7 +15,7 @@ class nCell(ABC):
     """
     n-cell base class. We will use this base to define the vertex, edge and plaquette classes.
 
-    `id` should be something hashable and unique within a dimension (e.g. a coordinate tuple, or a plain integer label). 
+    `key` should be something hashable and unique within a dimension (e.g. a coordinate tuple, or a plain integer label). 
     Equality and hashing are based on key + type, so two cells built separately with the same key are treated as the same 
     cell -- important since chains are implemented as sets/frozensets of cells.
     """
@@ -67,7 +67,7 @@ class ZeroCell(nCell):
 
     def __init__(self, key) -> None:
         """Initialise 0-cell instance."""
-        super().__init__(id)
+        super().__init__(key)
             
     def boundary(self) -> None:
         raise NotImplementedError("no -1-cells: boundary of a 0-cell is undefined here")
@@ -104,7 +104,7 @@ class OneCell(nCell):
         v1 : ZeroCell
             The other ZeroCell (vertex) that defines the other end of this edge
         """
-        super().__init__(id)
+        super().__init__(key)
         self.vertices = (v0, v1)
         v0.coboundary_cells.add(self)
         v1.coboundary_cells.add(self)
@@ -146,7 +146,7 @@ class TwoCell(nCell):
         - Not sure about calling them edges and plaquettes here, 
             maybe for consistency should rename some stuff.
         """
-        super().__init__(id)        
+        super().__init__(key)        
         self.edges = tuple(edges)
         for e in edges:
             e.coboundary_cells.add(self)
