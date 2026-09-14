@@ -4,18 +4,18 @@ class Qubit:
     This base class means that we can hold the position and key of each qubit within itself and use some helper methods too.
     """
 
-    def __init__(self, key: int, position: tuple[float | int, float | int]) -> None:
+    def __init__(self, key: int, pos: tuple[float | int, float | int]) -> None:
         self.key = key        
-        self.position = position
+        self.pos = pos
 
     
     def __repr__(self) -> str:
         """Return a string representation of the qubit (for debug)"""
-        return f"Qubit(position={self.position}, key={self.key})"
+        return f"Qubit(position={self.pos}, key={self.key})"
     
     def __iter__(self):
         """Iterate over the qubit's position and key."""
-        x, y = self.position
+        x, y = self.pos
         yield from (self.key, x, y)
 
     def __str__(self) -> str:
@@ -30,8 +30,9 @@ class Qubit:
         """
         if not isinstance(other, Qubit):
             return NotImplemented
-        return (self.position[0] == other.position[0]
-                and self.position[1] == self.position[1]
+        
+        return (self.pos[0] == other.pos[0]
+                and self.pos[1] == self.pos[1]
                 and self.key == other.key)
 
     def __gt__(self, other:object) -> bool:
@@ -49,4 +50,9 @@ class Qubit:
         if self.key < other.key:
             return True
         return False
+    
+    def __hash__(self) -> int:
+        """redefine hash after it is overriden by __eq__"""
+        return hash((type(self).__name__, self.key, self.pos))
+
     

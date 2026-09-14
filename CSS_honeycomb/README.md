@@ -44,5 +44,6 @@ I have done a bit of work on our Surface class today, we can now set up a circui
    - Qubit indices in visualisation methods. Should be able to label vertices by their id to help with debugging
    - Ancilla qubits. For heavy hex (not sure about phenomenological model) we will have ancillas on the "heavy" part of our hexagons. Then we apply cnots to flow stabilizers into measurements. This should actually be relatively easy with our homology tools!
 # 14/9/26
-   - fixed an error in the Plaquette initialisation that initialised it with vertices rather than edges. Thought it would be better to restructure some of the other classes like TwoCell. Can now initialise a Plaquette given its edges or vertices
-      - **TODO** Want to be able to compute vertices if given set of edges, that way we can easily use either.
+   - fixed an error in the Plaquette initialisation that initialised it with vertices rather than edges. Thought it would be better to restructure some of the other classes like TwoCell. Can now initialise a Plaquette given its edges or vertices.
+  
+Also started work on operations classes which make our life a little easier when applying detectors and things in our circuit. In the process we have lost the ability to use our circuit in the hexagonal (non-integer) coordinates. If we really want our circuit to work in both systems, we should just be able to set up coordinate maps but will worry about that later. Just note that using our operations on hexagonal coordinates don't work at the moment.
