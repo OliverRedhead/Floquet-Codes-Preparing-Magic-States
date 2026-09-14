@@ -1,5 +1,5 @@
 """
-This class will initalise our surface as a set of vertex, edge and plaquette objects 
+These classes will initalise our surface as a set of vertex, edge and plaquette objects 
 and help us do some useful strings of operations
 """
 
@@ -9,38 +9,63 @@ from homology import ZeroCell, OneCell, TwoCell, ZeroChain, OneChain, TwoChain
 from qubit import Qubit
 from collections.abc import Sequence
 
+"""
+nCell subclasses to hold coordinates and colour information as well as inherit all the 
+homology properties we want to use.
+"""
+
 class Vertex(ZeroCell):
 
     """
-    A vertex is a ZeroCell that also supports a data qubit.
-    A vertex has a unique id and a position. We will use integers as ids.
-    A vertex has no colour.
+    - A vertex is a ZeroCell that also supports a data qubit.
+    - A vertex has a unique key and a position. We will use integers as keys.
+        It is important that keys are integers as a Vertex and its Qubit should have the same unique key.
+    - A vertex has no colour.
     """
 
-    def __init__(self, id: int, pos: tuple[float, float] = (0,0), *, qubit: Qubit | None = None) -> None:
+    def __init__(self, key: int, pos: tuple[float, float] = (0,0), *, qubit: Qubit | None = None) -> None:
         """
         Initialise a vertex instance.
 
         parameters
         ----------
-        id : int 
-            unique identifier of vertex, this will be used when defining stim circuit.
+        key : int 
+            unique key of vertex, this will be used when defining stim circuit.
         pos : tuple[float, float] = (0, 0)
             position of vertex in our 2D space, top left is (0,0)
         qubit : Qubit | None = None
             choice to pass pre-initialised qubit. If qubit is `Qubit` then 
             the position parameter is ignored and vertex.qubit is set to 
             this qubit
+
+        Note
+        ----
+        - If qubit is not specified, we just make one at the position we are interestesd
+        - vertex key and qubit key **must** match, else we will have problems with stim.
+
         """
-        if not isinstance(id, int):
-            raise ValueError(f"id must be `int` not {type(id)}")
-        super().__init__(id)
+        assert isinstance(id, int | None)
+    
+    
+        # qubit key must be integer in stim
+        if not isinstance(id, int): 
+            raise ValueError(f"id must be `int` not {type(id).__name__}")
         
-        if qubit is None:
-            self.qubit = Qubit(id, pos)
-        else:
+        # qubit must have same key as this Vertex
+        if isinstance(qubit, Qubit): 
+            assert qubit.key == key, f"""`Vertex.key` and `Vertex.qubit.key` must match. 
+                                        Cannot have vertex.key={id}, qubit.key={qubit.key}"""
             self.qubit = qubit
+
+        elif qubit is None:
+            self.qubit = Qubit(key, pos)
+        
+        else:
+            raise ValueError(f"Vertex.qubit must be `Qubit` or `None`, not {type(qubit).__name__}")
+        
         self.pos = pos
+
+        super().__init__(id)
 
     def get_coordinates(self):
         """return coordinates of this vertex as tuple"""
@@ -49,12 +74,13 @@ class Vertex(ZeroCell):
 class Edge(OneCell):
 
     """
-    An edge is a OneCell defined by the two vertices that it joins.
-    An edge also has a unique id which we don't particularly care about.
-    An edge does have a colour, which should be defined by the colour of plaquettes that it bridges.
+    - An edge is a OneCell defined by the two Vertex instances that it joins.
+    - We will use integers as unique keys, although we shouldn't use them (I think).
+    - An edge does have a colour, which should be defined by the colour of plaquettes that it bridges.
+
     """
 
-    def __init__(self, id, v0: Vertex, v1: Vertex, colour: str) -> None:
+    def __init__(self, key, v0: Vertex, v1: Vertex, colour: str) -> None:
         if not isinstance(v0, Vertex) or not isinstance(v1, Vertex):
             raise ValueError(f"Edge must be handed two `Vertex` instances, not v0: {type(v0)} and v1: {type(v1)}")
 
@@ -70,28 +96,35 @@ class Edge(OneCell):
     
     def get_indices(self):
         v0, v1 = self.boundary()
-        return v0.id, v1.id
+        return v0.key, v1.key
 
 class Plaquette(TwoCell):
 
     """
-    A plaquette is a TwoCell defined by the edges that make up its boundary.
-    An edge also has a unique id which we don't particularly care about.
-    A plaquette does have a colour.
+    - A plaquette is a TwoCell defined by the Edge or Vertex instances that make up its boundary.
+    - We will use integers as unique keys, although we shouldn't use them (I think)
+    - A plaquetter does have a colour, we will use the convention that the top left hexagon is red,
+        and the hexagon joining it to the lower right is green. This should uniquelly define the 
+        colours of our surface.
+    
+    Note:
+    This class allows us to initialise a plaquette given a list of its edges **or** its vertices (not both)
+    In either case we compute the other too so a Plaquette instance holds a list of edges and vertices, not
+    sure how useful this will be.
     """
 
     def __init__(
         self,
-        id,
+        key,
         colour: str,
         *,
         edges: Sequence[Edge] | None = None,
         vertices: Sequence[Vertex] | None = None
     ) -> None:
 
-        if vertices is not None:
+        if vertices is not None: # if vertices are specified
 
-            if edges is not None:
+            if edges is not None: # if edges are specified
                 raise ValueError(
                     "You have specified both edges and vertices, "
                     "must only specify one or the other."
@@ -113,16 +146,24 @@ class Plaquette(TwoCell):
                 for edge in candidate_edges
                 if all(v in vertex_set for v in edge.vertices)
             )
+        
+        elif edges is not None: # if edges are specified
 
-        elif edges is None:
+            vertex_set = {
+                vertex
+                for edge in edges
+                for vertex in edge.boundary()
+                if isinstance(vertex, Vertex)
+            }
+
+        else:
             raise ValueError(
                 "cannot have edges and vertices None; "
                 "must specify one or the other."
             )
 
         super().__init__(id, edges)
-        # TODO need to compute vertices if given edges:
-        # self.vertices = OneChain(vertices)
+        self.vertices = OneChain(vertices)
 
         if colour not in ["red", "green", "blue"]:
             raise ValueError(
@@ -132,7 +173,7 @@ class Plaquette(TwoCell):
         self.colour = colour
 
     def __str__(self):
-        return f"Plaquette({self.id}) {self.colour}"
+        return f"Plaquette({self.key}) {self.colour}"
 
     def get_coordinates(
         self,
@@ -186,7 +227,7 @@ class Plaquette(TwoCell):
 
 class Surface:
     """
-    Owns the vertices, edges and plaquettes of a lattice, keyed by id.
+    Owns the vertices, edges and plaquettes of a lattice, keyed by key.
     Responsible for construction, lookup, incidence queries and validation.
     """
 

@@ -16,34 +16,34 @@ class nCell(ABC):
     n-cell base class. We will use this base to define the vertex, edge and plaquette classes.
 
     `id` should be something hashable and unique within a dimension (e.g. a coordinate tuple, or a plain integer label). 
-    Equality and hashing are based on id + type, so two cells built separately with the same id are treated as the same 
+    Equality and hashing are based on key + type, so two cells built separately with the same key are treated as the same 
     cell -- important since chains are implemented as sets/frozensets of cells.
     """
 
     n = None
 
-    def __init__(self, id) -> None:
+    def __init__(self, key) -> None:
         """
         Initialise nCell instance.
 
         Parameters
         ----------
-        id : hashable
+        key : hashable
             should be something hashable and unique within a dimension. I imagine we will mostly be using unique integer
-            identifiers.
+            keys.
         """
-        self.id = id
+        self.key = key
         # initialise empty coboundary list
         self.coboundary_cells: set[nCell] = set()
 
     def __eq__(self, other) -> bool:
-        return isinstance(other, type(self)) and self.id == other.id
+        return isinstance(other, type(self)) and self.key == other.key
 
     def __hash__(self) -> int:
-        return hash((type(self).__name__, self.id))
+        return hash((type(self).__name__, self.key))
 
     def __repr__(self) -> str:
-        return f"{type(self).__name__}({self.id!r})"
+        return f"{type(self).__name__}({self.key!r})"
     
     """
     and our boundary and coboundary maps as abstract methods
@@ -65,7 +65,7 @@ class ZeroCell(nCell):
 
     n = 0
 
-    def __init__(self, id) -> None:
+    def __init__(self, key) -> None:
         """Initialise 0-cell instance."""
         super().__init__(id)
             
@@ -90,15 +90,15 @@ class OneCell(nCell):
 
     n = 1
     
-    def __init__(self, id, v0: ZeroCell, v1: ZeroCell) -> None:
+    def __init__(self, key, v0: ZeroCell, v1: ZeroCell) -> None:
         """
         Initialise 1-Cell instance (edge). An edge is defined by the vertices it connects.
         While initialising we set up the coboundary maps of the vertices
 
         Parameters
         ----------
-        id : hashable
-            unique identifier of this 1-cell. Should be consistent within all 1-chains
+        key : hashable
+            unique keyentifier of this 1-cell. Should be consistent within all 1-chains
         v0 : ZeroCell
             A ZeroCell (vertex) that defines one end of this edge
         v1 : ZeroCell
@@ -130,14 +130,14 @@ class TwoCell(nCell):
 
     n = 2
 
-    def __init__(self, id, edges: Sequence[OneCell]) -> None:
+    def __init__(self, key, edges: Sequence[OneCell]) -> None:
         """
         Initialise TwoCell (plaquette) defined by its edges.
 
         Parameters
         ----------
-        id : hashable
-            Unique identifier for this plaquette, should be consistent will other plaquettes
+        key : hashable
+            Unique keyentifier for this plaquette, should be consistent will other plaquettes
         edges : Sequence[OneCell] | None
             edges that define this plaquette
 
