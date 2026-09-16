@@ -230,6 +230,10 @@ class nChain(ABC):
         """can iterate over cells in an nChain"""
         return iter(self.cells)
 
+    def __len__(self) -> int:
+        """length of onechain is the number of cells in our frozenset"""
+        return len(self.cells)
+
     """abstract methods: boundary and coboundary maps"""
 
     @abstractmethod
@@ -239,6 +243,14 @@ class nChain(ABC):
     @abstractmethod
     def coboundary(self):
         raise NotImplementedError
+    
+    def __getitem__(self, index):
+        """
+        Index or slice into the chain's cells. Note: frozenset has no
+        intrinsic order, so this is a consistent-but-arbitrary ordering,
+        not necessarily related to construction order.
+        """
+        return tuple(self.cells)[index]
     
 """specific n-Chain classes for n = 0, 1 and 2"""
 

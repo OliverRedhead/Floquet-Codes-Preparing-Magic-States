@@ -174,51 +174,56 @@ class Plaquette(TwoCell):
 
     def __str__(self):
         return f"Plaquette({self.key}) {self.colour}"
-
-    def get_coordinates(
-        self,
-        ordered = False
-    ) -> tuple[tuple[float, float], ...]:
-
-        """Return coordinates of the unique vertices making up these edges.
-
-        Parameters
-        ----------
-        order : bool = False
-            If specified, order the vertices around their centre.
+    
+    def get_ordered_vertices(self) -> tuple["Vertex", ...]:
         """
+        Return this plaquette's vertices, ordered anticlockwise around their
+        centroid. Angles are computed from `.pos` (square coordinates), so
+        this ordering is independent of whatever coordinate system is later
+        used for plotting.
+        """
+        vertices = list(self.vertices)
+        if not vertices:
+            return tuple()
 
-        edges = self.boundary()
+        coords = np.array([v.pos for v in vertices], dtype=float)
+        centre = coords.mean(axis=0)
+        angles = np.arctan2(coords[:, 1] - centre[1], coords[:, 0] - centre[0])
+        order = np.argsort(angles)
+        return tuple(vertices[i] for i in order)
 
-        vertices = {
-            v
-            for edge in edges
-            for v in edge.boundary()
-        }
-
-        coords = np.array(
-            [v.pos for v in vertices],
-            dtype=float
-        )
-
-        if ordered is False:
+    def get_coordinates(self, ordered=False) -> tuple[tuple[float, float], ...]:
+        """Return coordinates of the unique vertices making up these edges."""
+        if not ordered:
+            vertices = {v for v in self.vertices}
+            coords = np.array([v.pos for v in vertices], dtype=float)
             return tuple(map(tuple, coords))
 
-        # Centre of the vertices
-        centre = coords.mean(axis=0)
+        return tuple(v.pos for v in self.get_ordered_vertices())
 
-        # Angle of each vertex relative to the centre
-        angles = np.arctan2(
-            coords[:, 1] - centre[1],
-            coords[:, 0] - centre[0]
-        )
+    def get_boundary_gap_index(self) -> int | None:
+        """
+        Return the index i such that the edge between get_ordered_vertices()[i]
+        and [i+1] (mod n) is *not* backed by a real Edge object -- i.e. it's
+        the topological gap left by truncation at the surface boundary, which
+        is what should be bulged outward. Returns None for a full, closed
+        hexagon (no gap to speak of).
+        """
+        ordered = self.get_ordered_vertices()
+        n = len(ordered)
 
-        # Increasing angle = anticlockwise
-        indices = np.argsort(angles)
-        coords = coords[indices]
+        for i in range(n):
+            v0, v1 = ordered[i], ordered[(i + 1) % n]
+            if not (v0.coboundary_cells & v1.coboundary_cells):
+                return i
 
-        return tuple(map(tuple, coords))
+        return None
     
+    def __len__(self):
+        """
+        length of a plaquette is the number of vertices it supports
+        """
+        return len(self.vertices)
 
 
 # ------------------------- #
@@ -302,29 +307,39 @@ class Surface:
         """
         Initialise plaquettes, needs to be called after vertices are initialised.
         A plaquette is built starting from the qubit in the top left (closest to (0,0)).
-        Colour choice is relatively simple in our square coordinate system.
+        Anchors are allowed to sit one step outside the grid (x=-1 or y=-1) so that
+        boundary plaquettes on the left/top are generated too, truncated to whichever
+        of the 6 vertices actually exist. Weight-1 and weight-2 boundary stabilisers
+        are kept.
         """
+
+        def get_vertex(x, y):
+            if 0 <= x < self.ncols and 0 <= y < self.nrows:
+                return self.vertices[y * self.ncols + x]
+            return None
+
+        offsets = [(0, 0), (1, 0), (0, 1), (1, 1), (0, 2), (1, 2)]
 
         plaquettes = []
 
-        for i, v0 in enumerate(self.vertices):
-            x, y = v0.pos
+        for y in range(-1, self.nrows):
+            for x in range(-1, self.ncols):
+                if (x + y) % 2 != 0:
+                    continue
 
-            if (x+y)%2 == 0 and x < self.ncols - 1 and y < self.nrows - 2:
+                candidates = [get_vertex(x + dx, y + dy) for dx, dy in offsets]
+                vertices = [v for v in candidates if v is not None]
 
-                v1 = self.vertices[i + 1]
-                v2 = self.vertices[i + self.ncols]
-                v3 = self.vertices[i + self.ncols + 1]
-                v4 = self.vertices[i + 2*self.ncols]
-                v5 = self.vertices[i + 2*self.ncols + 1]
+                if not vertices:
+                    continue
 
                 plaquette = Plaquette(
                     len(plaquettes),
                     colour=Surface.__colour_plaquette(y),
-                    vertices=[v0, v1, v2, v3, v4, v5]
+                    vertices=vertices
                 )
-
                 plaquettes.append(plaquette)
+
         return plaquettes
 
     """
@@ -456,7 +471,7 @@ class Surface:
         'blue' : '#3498db', 
                }
 
-    def plot_surface(self, coordinates="square"):
+    def plot_surface(self, coordinates="square", bulge=0.35, n_arc=16):
 
         """Visualise the surface."""
 
@@ -466,34 +481,67 @@ class Surface:
                 return np.asarray(x, dtype=float)
 
         elif coordinates == "hex":
-            coord_map = self.square_to_hex # type: ignore
+
+            coord_map = self.square_to_hex  # type: ignore
 
         else:
+
             raise ValueError(
                 f"`coordinates` must be 'square' or 'hex', not {coordinates!r}"
             )
 
-        # Plaquettes
         for p in self.plaquettes:
 
             p_coords = coord_map(
-                np.asarray(p.get_coordinates(ordered=True), dtype=float)
+                np.asarray(
+                    p.get_coordinates(ordered=True),
+                    dtype=float
+                )
             )
 
-            plt.fill(
-                p_coords[:, 0],
-                p_coords[:, 1],
-                alpha=0.3,
-                facecolor=p.colour,
-                edgecolor="black",
-                zorder=1
-            )
+            if len(p) == 6:
 
-        # Edges
+                plt.fill(
+                    p_coords[:, 0],
+                    p_coords[:, 1],
+                    alpha=0.3,
+                    facecolor=p.colour,
+                    edgecolor="black",
+                    zorder=1
+                )
+
+            elif len(p) == 4 or len(p) == 3:
+
+                gap_index = p.get_boundary_gap_index()
+
+                if gap_index is None:
+                    # Fully connected — shouldn't normally happen for a
+                    # truncated plaquette, but fall back to a plain polygon.
+                    patch_coords = p_coords
+                else:
+                    patch_coords = Surface.__bulge_boundary_edge(
+                        p_coords,
+                        gap_index,
+                        bulge,
+                        n_arc
+                    )
+
+                plt.fill(
+                    patch_coords[:, 0],
+                    patch_coords[:, 1],
+                    alpha=0.3,
+                    facecolor=p.colour,
+                    edgecolor="black",
+                    zorder=1
+                )
+
         for e in self.edges:
 
             e_coords = coord_map(
-                np.asarray(e.get_coordinates(), dtype=float)
+                np.asarray(
+                    e.get_coordinates(),
+                    dtype=float
+                )
             )
 
             plt.plot(
@@ -504,7 +552,6 @@ class Surface:
                 zorder=2
             )
 
-        # Vertices
         mapped_coords = coord_map(
             np.asarray(self.coords, dtype=float)
         )
@@ -518,4 +565,51 @@ class Surface:
 
         plt.axis("equal")
         plt.gca().yaxis.set_inverted(True)
+
         plt.show()
+
+
+    @staticmethod
+    def __bulge_boundary_edge(p_coords, gap_index, bulge, n_arc=16):
+        """
+        Replace the edge at `gap_index` (between ordered vertex gap_index and
+        gap_index + 1) with a quadratic Bezier arc bulging outward, where
+        `gap_index` has already been determined topologically (the one edge
+        of the truncated plaquette with no backing Edge object). Works in
+        whatever coordinate system p_coords is already expressed in.
+        """
+        p_coords = np.asarray(p_coords, dtype=float)
+        n = len(p_coords)
+
+        if n < 3:
+            raise ValueError("A polygon must contain at least 3 vertices.")
+
+        i0 = gap_index
+        i1 = (i0 + 1) % n
+        p0, p1 = p_coords[i0], p_coords[i1]
+
+        d = p1 - p0
+        length = np.linalg.norm(d)
+        if np.isclose(length, 0):
+            return p_coords.copy()
+        d_hat = d / length
+
+        # Winding order tells us which side is "outward" -- works under
+        # reflections/shears from coord_map since signed area flips sign
+        # along with the polygon.
+        x, y = p_coords[:, 0], p_coords[:, 1]
+        signed_area = 0.5 * np.sum(x * np.roll(y, -1) - np.roll(x, -1) * y)
+
+        if signed_area > 0:
+            outward = np.array([d_hat[1], -d_hat[0]])
+        else:
+            outward = np.array([-d_hat[1], d_hat[0]])
+
+        mid = (p0 + p1) / 2
+        control = mid + outward * bulge * length
+
+        t = np.linspace(0, 1, n_arc)[:, None]
+        arc = (1 - t) ** 2 * p0 + 2 * (1 - t) * t * control + t ** 2 * p1
+
+        remaining = [p_coords[(i1 + k) % n] for k in range(1, n - 1)]
+        return np.vstack([arc, np.asarray(remaining)])
