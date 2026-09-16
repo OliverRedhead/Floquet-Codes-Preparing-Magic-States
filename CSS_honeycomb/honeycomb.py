@@ -354,7 +354,9 @@ class Surface:
     stim interaction methods
     """
 
-    def initialise_qubits(self, coordinates='square') -> str:
+    # circuit initialisation
+
+    def initialise_circuit(self, coordinates='square') -> str:
         """
         Converts our Surface into stim language.
 
@@ -362,7 +364,7 @@ class Surface:
         """
         
         if coordinates != 'square':
-            return self.__initialise_qubits_hex()
+            return self.__initialise_circuit_hex()
         
         string = ""
         for v in self.vertices:
@@ -370,12 +372,14 @@ class Surface:
         
         return string
     
-    def __initialise_qubits_hex(self):
+    def __initialise_circuit_hex(self):
         string = ""        
         hex_coords = Surface.square_to_hex(self.coords)
         for i, (x, y) in enumerate(hex_coords):
             string += f"QUBIT_COORDS({x}, {y}) {i}\n"
         return string
+
+    # measurement protocol
 
     def measure_edges(self, colour, flavour="Z"):
         """
@@ -387,6 +391,15 @@ class Surface:
         for t0, t1 in target_qubits:
             string += f"{t0} {t1} "
         return string 
+
+    # state preparation TODO
+
+    def prepare_qubits(self):
+        """
+        This method should prepare our states states following our injection protocol
+        """
+        pass
+
 
 
     """
