@@ -119,7 +119,8 @@ class Plaquette(TwoCell):
         colour: str,
         *,
         edges: Sequence[Edge] | None = None,
-        vertices: Sequence[Vertex] | None = None
+        vertices: Sequence[Vertex] | None = None,
+        missing_positions: Sequence[tuple[float, float]] | None = None
     ) -> None:
 
         if vertices is not None: # if vertices are specified
@@ -171,6 +172,8 @@ class Plaquette(TwoCell):
             )
 
         self.colour = colour
+
+        self.missing_positions = tuple(missing_positions) if missing_positions else ()
 
     def __str__(self):
         return f"Plaquette({self.key}) {self.colour}"
@@ -322,13 +325,18 @@ class Surface:
 
         plaquettes = []
 
-        for y in range(-1, self.nrows):
+        for y in range(-2, self.nrows):
             for x in range(-1, self.ncols):
                 if (x + y) % 2 != 0:
                     continue
 
                 candidates = [get_vertex(x + dx, y + dy) for dx, dy in offsets]
                 vertices = [v for v in candidates if v is not None]
+                missing_positions = [
+                    (x + dx, y + dy)
+                    for (dx, dy), v in zip(offsets, candidates)
+                    if v is None
+                ]
 
                 if not vertices:
                     continue
@@ -336,7 +344,8 @@ class Surface:
                 plaquette = Plaquette(
                     len(plaquettes),
                     colour=Surface.__colour_plaquette(y),
-                    vertices=vertices
+                    vertices=vertices,
+                    missing_positions=missing_positions,
                 )
                 plaquettes.append(plaquette)
 
@@ -510,21 +519,53 @@ class Surface:
                     zorder=1
                 )
 
-            elif len(p) == 4 or len(p) == 3:
+            elif len(p) in [3, 4]:
 
                 gap_index = p.get_boundary_gap_index()
 
-                if gap_index is None:
-                    # Fully connected — shouldn't normally happen for a
-                    # truncated plaquette, but fall back to a plain polygon.
+                if gap_index is None or not p.missing_positions:
                     patch_coords = p_coords
                 else:
-                    patch_coords = Surface.__bulge_boundary_edge(
-                        p_coords,
-                        gap_index,
-                        bulge,
-                        n_arc
+                    missing_mapped = coord_map(
+                        np.asarray(p.missing_positions, dtype=float)
                     )
+                    missing_centre = missing_mapped.mean(axis=0)
+                    p_centre = p_coords.mean(axis=0)
+
+                    outward_dir = missing_centre - p_centre
+                    norm = np.linalg.norm(outward_dir)
+                    outward_dir = (
+                        outward_dir / norm if not np.isclose(norm, 0)
+                        else np.array([1.0, 0.0])
+                    )
+
+                    patch_coords = Surface.__bulge_boundary_edge(
+                        p_coords, gap_index, outward_dir, bulge, n_arc
+                    )
+
+                plt.fill(
+                    patch_coords[:, 0],
+                    patch_coords[:, 1],
+                    alpha=0.3,
+                    facecolor=p.colour,
+                    edgecolor="black",
+                    zorder=1
+                )
+            elif len(p) == 2:
+
+                if p.missing_positions:
+                    missing_mapped = coord_map(np.asarray(p.missing_positions, dtype=float))
+                    missing_centre = missing_mapped.mean(axis=0)
+                    p_centre = p_coords.mean(axis=0)
+                    outward_dir = missing_centre - p_centre
+                    norm = np.linalg.norm(outward_dir)
+                    outward_dir = outward_dir / norm if not np.isclose(norm, 0) else np.array([1.0, 0.0])
+                else:
+                    outward_dir = np.array([1.0, 0.0])
+
+                patch_coords = Surface.__bulge_edge_outward(
+                    p_coords[0], p_coords[1], outward_dir, bulge, n_arc
+                )
 
                 plt.fill(
                     patch_coords[:, 0],
@@ -570,13 +611,15 @@ class Surface:
 
 
     @staticmethod
-    def __bulge_boundary_edge(p_coords, gap_index, bulge, n_arc=16):
+    def __bulge_boundary_edge(p_coords, gap_index, outward_dir, bulge, n_arc=16):
         """
-        Replace the edge at `gap_index` (between ordered vertex gap_index and
-        gap_index + 1) with a quadratic Bezier arc bulging outward, where
-        `gap_index` has already been determined topologically (the one edge
-        of the truncated plaquette with no backing Edge object). Works in
-        whatever coordinate system p_coords is already expressed in.
+        Replace the edge at `gap_index` with a quadratic Bezier arc bulging
+        towards `outward_dir`. `outward_dir` is derived per-plaquette from
+        where its truncated (missing) vertex would have been, in whatever
+        coordinate system is currently being plotted -- not from the
+        polygon's own winding order, which is unreliable for boundary
+        plaquettes that collapse to a near-zero-area sliver in square
+        coordinates.
         """
         p_coords = np.asarray(p_coords, dtype=float)
         n = len(p_coords)
@@ -594,16 +637,10 @@ class Surface:
             return p_coords.copy()
         d_hat = d / length
 
-        # Winding order tells us which side is "outward" -- works under
-        # reflections/shears from coord_map since signed area flips sign
-        # along with the polygon.
-        x, y = p_coords[:, 0], p_coords[:, 1]
-        signed_area = 0.5 * np.sum(x * np.roll(y, -1) - np.roll(x, -1) * y)
+        normal_1 = np.array([-d_hat[1], d_hat[0]])
+        normal_2 = -normal_1
 
-        if signed_area > 0:
-            outward = np.array([d_hat[1], -d_hat[0]])
-        else:
-            outward = np.array([-d_hat[1], d_hat[0]])
+        outward = normal_2 if np.dot(normal_2, outward_dir) > np.dot(normal_1, outward_dir) else normal_1
 
         mid = (p0 + p1) / 2
         control = mid + outward * bulge * length
@@ -613,3 +650,32 @@ class Surface:
 
         remaining = [p_coords[(i1 + k) % n] for k in range(1, n - 1)]
         return np.vstack([arc, np.asarray(remaining)])
+    
+    @staticmethod
+    def __bulge_edge_outward(p0, p1, outward_dir, bulge, n_arc=16):
+        """
+        For a weight-2 plaquette (two vertices, one edge), replace the
+        straight edge with a single Bezier arc bulging outward. plt.fill
+        closes the shape by drawing a straight line back from p1 to p0,
+        so no return arc is needed.
+        """
+        p0 = np.asarray(p0, dtype=float)
+        p1 = np.asarray(p1, dtype=float)
+
+        d = p1 - p0
+        length = np.linalg.norm(d)
+        if np.isclose(length, 0):
+            return np.vstack([p0, p1])
+        d_hat = d / length
+
+        normal_1 = np.array([-d_hat[1], d_hat[0]])
+        normal_2 = -normal_1
+
+        outward = normal_2 if np.dot(normal_2, outward_dir) > np.dot(normal_1, outward_dir) else normal_1
+
+        control = (p0 + p1) / 2 + outward * bulge * length
+
+        t = np.linspace(0, 1, n_arc)[:, None]
+        arc = (1 - t) ** 2 * p0 + 2 * (1 - t) * t * control + t ** 2 * p1
+
+        return arc
