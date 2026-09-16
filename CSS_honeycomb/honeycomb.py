@@ -312,8 +312,7 @@ class Surface:
         A plaquette is built starting from the qubit in the top left (closest to (0,0)).
         Anchors are allowed to sit one step outside the grid (x=-1 or y=-1) so that
         boundary plaquettes on the left/top are generated too, truncated to whichever
-        of the 6 vertices actually exist. Weight-1 and weight-2 boundary stabilisers
-        are kept.
+        of the 6 vertices actually exist.
         """
 
         def get_vertex(x, y):
@@ -356,6 +355,11 @@ class Surface:
     """
 
     def initialise_qubits(self, coordinates='square') -> str:
+        """
+        Converts our Surface into stim language.
+
+        NOTE For now, the circuit only works in square coordinates.
+        """
         
         if coordinates != 'square':
             return self.__initialise_qubits_hex()
@@ -608,7 +612,6 @@ class Surface:
         plt.gca().yaxis.set_inverted(True)
 
         plt.show()
-
 
     @staticmethod
     def __bulge_boundary_edge(p_coords, gap_index, outward_dir, bulge, n_arc=16):
