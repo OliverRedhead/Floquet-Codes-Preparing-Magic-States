@@ -11,6 +11,9 @@ from abc import ABC, abstractmethod
 from collections.abc import Sequence
 from typing import Iterator
 
+
+"""nCell base class"""
+
 class nCell(ABC):
     """
     n-cell base class. We will use this base to define the vertex, edge and plaquette classes.
@@ -20,7 +23,7 @@ class nCell(ABC):
     cell -- important since chains are implemented as sets/frozensets of cells.
     """
 
-    n = None
+    n : int
 
     def __init__(self, key) -> None:
         """
@@ -37,17 +40,20 @@ class nCell(ABC):
         self.coboundary_cells: set[nCell] = set()
 
     def __eq__(self, other) -> bool:
-        return isinstance(other, type(self)) and self.key == other.key
+        """two nCells are equal if they have the same key"""
+        if not isinstance(other, type(self)) or other.n != self.n:
+            raise NotImplementedError
+        return self.key == other.key
 
     def __hash__(self) -> int:
+        """redefine hash after overriding with __eq__"""
         return hash((type(self).__name__, self.key))
 
     def __repr__(self) -> str:
+        """representation of nCell for debugging"""
         return f"{type(self).__name__}({self.key!r})"
     
-    """
-    and our boundary and coboundary maps as abstract methods
-    """
+    """abstract methods: boundary and coboundary maps"""
 
     @abstractmethod
     def boundary(self):
@@ -57,6 +63,7 @@ class nCell(ABC):
     def coboundary(self):
         raise NotImplementedError
     
+"""specific n-Cell classes for n = 0, 1 and 2"""
 
 class ZeroCell(nCell):
     """
@@ -162,6 +169,7 @@ class TwoCell(nCell):
         raise NotImplementedError("no 3-cells: coboundary of a 2-cell is undefined here")
 
 
+"""nChain base clas"""
 
 class nChain(ABC):
     """
@@ -171,7 +179,7 @@ class nChain(ABC):
     `frozenset` is a really useful structure here. Got this idea of Claude
     """
 
-    n = None
+    n: int
 
     def __init__(self, cells=()) -> None:
         """
@@ -185,12 +193,12 @@ class nChain(ABC):
         self.cells = frozenset(cells)
 
     def __add__(self, other):
-
+        """add nChains by adding their cells in mod 2"""
         if not isinstance(other, nChain):
             return NotImplemented
 
         if self.n != other.n:
-            raise TypeError(
+            raise NotImplementedError(
                 f"cannot add {type(self).__name__} and {type(other).__name__}"
             )
 
@@ -203,19 +211,26 @@ class nChain(ABC):
         return NotImplemented
 
     def __eq__(self, other) -> bool:
+        """two nChains are equal if their cells are equal"""
         return isinstance(other, type(self)) and self.cells == other.cells
     
     def __hash__(self) -> int:
+        """redefine hash after overriding with __eq__"""
         return hash(self.cells)
 
     def __bool__(self) -> bool:
+        """An nChain is true if it in non-empty"""
         return bool(self.cells)
 
     def __repr__(self) -> str:
+        """define how to represent an nChain in debugging"""
         return f"{type(self).__name__}({set(self.cells)})"
     
     def __iter__(self) -> Iterator[nCell]:
+        """can iterate over cells in an nChain"""
         return iter(self.cells)
+
+    """abstract methods: boundary and coboundary maps"""
 
     @abstractmethod
     def boundary(self):
@@ -225,6 +240,7 @@ class nChain(ABC):
     def coboundary(self):
         raise NotImplementedError
     
+"""specific n-Chain classes for n = 0, 1 and 2"""
 
 class ZeroChain(nChain):
 
@@ -267,7 +283,6 @@ class TwoChain(nChain):
 
     def coboundary(self):
         raise NotImplementedError("no 3-cells: coboundary of a 2-chain is undefined here")
-
 
 
 # --- #
