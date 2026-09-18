@@ -1,5 +1,6 @@
 from qubit import Qubit
 import numpy as np
+from qubit_containers import Plaquette
 
 """
 Detectors in stim are set on measurements, stim holds measurements as just an ordered list
