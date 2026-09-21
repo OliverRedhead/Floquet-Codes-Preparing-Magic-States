@@ -1,8 +1,8 @@
 import numpy as np
 import matplotlib.pyplot as plt
-from qubit_containers import Vertex, Edge, Plaquette
+from qubit_containers import Vertex, Edge, Plaquette, BoundaryPlaquette
 
-class Surface:
+class CSSHoneycomb:
     """
     Owns the vertices, edges and plaquettes of a lattice, keyed by key.
     Responsible for construction, lookup, incidence queries and validation.
@@ -14,9 +14,9 @@ class Surface:
     initialisation methods
     """
 
-    def __init__(self, nrows : int = 4, ncols : int = 5) -> None:
+    def __init__(self, ncols : int = 5, nrows : int = 4) -> None:
         """
-        Initialise Surface instance. Automatically generates vertices (and qubits) based on input nrows and ncols.
+        Initialise CSSHoneycomb instance. Automatically generates vertices (and qubits) based on input nrows and ncols.
         NOTE that not all boundary conditions are accounted for. 
 
         Parameters
@@ -61,8 +61,9 @@ class Surface:
         """
         
         def make_edge(edges, v0, v1):
-            colour = Surface.__colour_edge(v0.pos[1], v1.pos[1])
-            return Edge(len(edges), v0=v0, v1=v1, colour=colour)
+            colour = CSSHoneycomb.__colour_edge(v0.pos[1], v1.pos[1])
+            ancilla_key = len(self.vertices) + len(edges)
+            return Edge(len(edges), v0=v0, v1=v1, colour=colour, ancilla_key=ancilla_key)
 
         edges = []
         for i, v0 in enumerate(self.vertices):
@@ -109,12 +110,22 @@ class Surface:
                 if not vertices:
                     continue
 
-                plaquette = Plaquette(
-                    len(plaquettes),
-                    colour=Surface.__colour_plaquette(y),
-                    vertices=vertices,
-                    missing_positions=missing_positions,
-                )
+                colour = CSSHoneycomb.__colour_plaquette(y)
+
+                if missing_positions:
+                    plaquette = BoundaryPlaquette(
+                        len(plaquettes),
+                        colour=colour,
+                        vertices=vertices,
+                        missing_positions=missing_positions,
+                    )
+                else:
+                    plaquette = Plaquette(
+                        len(plaquettes),
+                        colour=colour,
+                        vertices=vertices,
+                    )
+
                 plaquettes.append(plaquette)
 
         return plaquettes
@@ -127,7 +138,7 @@ class Surface:
 
     def initialise_circuit(self, coordinates='square') -> str:
         """
-        Converts our Surface into stim language.
+        Converts our CSSHoneycomb into stim language.
 
         NOTE For now, the circuit only works in square coordinates.
         """
@@ -135,39 +146,128 @@ class Surface:
         if coordinates != 'square':
             return self.__initialise_circuit_hex()
         
-        string = ""
+        string = "# data qubits\n"
         for v in self.vertices:
             string += str(v.qubit) + "\n"
+
+        string += "# ancilla qubits\n"
+        for e in self.edges:
+            string += str(e.ancilla) + "\n"
         
         return string
     
     def __initialise_circuit_hex(self):
         string = ""        
-        hex_coords = Surface.square_to_hex(self.coords)
+        hex_coords = CSSHoneycomb.square_to_hex(self.coords)
         for i, (x, y) in enumerate(hex_coords):
             string += f"QUBIT_COORDS({x}, {y}) {i}\n"
         return string
 
     # measurement protocol
 
+    @staticmethod
+    def __get_CNOTs(edge: Edge, flavour="Z", r=0) -> tuple[int, int]:
+        """
+        Helper method to get the CNOT schedule of a particular edge.
+
+        Parameters
+        ----------
+        edge : Edge
+            The edge we want to measure
+        flavour : str = "Z"
+            The flavour of measurement. This will determine the direction of CNOTs
+        r : int = 0 | 1
+            The 'round' of CNOTs we are applying. Should be binary. Determines if we
+            apply CNOT to edge.vertex0 or edge.vertex1
+
+        Returns
+        -------
+        cnot : tuple[int, int]
+            A tuple of keys of the cnot. Should be in order (control, target).
+
+        Notes
+        -----
+        Need to make sure that the order of this is correct!
+        """
+        vertex = edge.vertices[r]
+        ancilla = edge.ancilla
+
+        if flavour == "Z":
+            # ZZ: ancilla -> data
+            return ancilla.key, vertex.key
+
+        elif flavour == "X":
+            # XX: data -> ancilla
+            return vertex.key, ancilla.key
+
+        else:
+            raise ValueError("flavour must be 'X' or 'Z'")
+
+
     def measure_edges(self, colour, flavour="Z"):
         """
-        We can pick out all the edges of a certain colour and measure them easily
+        We can pick out all the edges of a certain colour and measure them easily.
         """
-        string = f"M{flavour} "
+        string = ""
+
         target_edges = [e for e in self.edges if e.colour == colour]
-        target_qubits = [e.get_indices() for e in target_edges]
-        for t0, t1 in target_qubits:
-            string += f"{t0} {t1} "
-        return string 
+        ancilla_keys = [e.ancilla.key for e in target_edges]
+
+        # Initialise ancillas in |0>
+        string += f"# prepare ancillas in {flavour} basis\nR "
+        for a in ancilla_keys:
+            string += str(a) + " "
+        string += "\nTICK\n"
+        
+        # If measuring X stabilizer, put ancillas X basis
+        if flavour == "X":
+            string += "H "      # Hadamard
+            for a in ancilla_keys:
+                string += str(a) + " "
+            string += "\nTICK\n"
+
+        # First round of CNOTs between v0 and ancilla
+        string += "# fold stabilizers\nCNOT "
+        for edge in target_edges:
+            c, t = CSSHoneycomb.__get_CNOTs(edge, flavour=flavour, r=0)
+            string += f"{c} {t} "
+        string += "\nTICK\n"
+
+        # Second round of CNOTs between v1 and ancilla
+        string += "CNOT "
+        for edge in target_edges:
+            c, t = CSSHoneycomb.__get_CNOTs(edge, flavour=flavour, r=1)
+            string += f"{c} {t} "
+        string += "\nTICK\n"
+
+        # If measuring X stabilizer, put ancillas back in Z basis
+        if flavour == "X":
+            string += "# rotate ancillas back to Z basis\nH "
+            for a in ancilla_keys:
+                string += str(a) + " "
+            string += "\nTICK\n"
+
+        # measure ancillas
+        string += "M "
+        for a in ancilla_keys:
+            string += str(a) + " "
+    
+        return string
 
     # state preparation TODO
 
-    def prepare_qubits(self):
+    def prepare_qubits(self) -> str:
         """
         This method should prepare our states states following our injection protocol
+
+        NOTE For now, we initialise everying in |0>
         """
-        pass
+        qubit_keys = [v.key for v in self.vertices]
+        
+        string = "# initialise qubits in |0>\nR "
+        for key in qubit_keys:
+            string += str(key) + " "
+        return string
 
 
 
@@ -181,7 +281,7 @@ class Surface:
         for colouring plaquettes. Very simple condition in our choice of square coordinates
         """
         index = int(y%3)
-        return Surface.RGB[index]
+        return CSSHoneycomb.RGB[index]
     
     @staticmethod
     def __colour_edge(y0, y1):
@@ -294,6 +394,10 @@ class Surface:
                 )
             )
 
+            mapped_coords = coord_map(
+               np.asarray(self.coords, dtype=float)
+            )
+
             if len(p) == 6:
 
                 plt.fill(
@@ -325,7 +429,7 @@ class Surface:
                         else np.array([1.0, 0.0])
                     )
 
-                    patch_coords = Surface.__bulge_boundary_edge(
+                    patch_coords = CSSHoneycomb.__bulge_boundary_edge(
                         p_coords, gap_index, outward_dir, bulge, n_arc
                     )
 
@@ -349,7 +453,7 @@ class Surface:
                 else:
                     outward_dir = np.array([1.0, 0.0])
 
-                patch_coords = Surface.__bulge_edge_outward(
+                patch_coords = CSSHoneycomb.__bulge_edge_outward(
                     p_coords[0], p_coords[1], outward_dir, bulge, n_arc
                 )
 
@@ -361,6 +465,30 @@ class Surface:
                     edgecolor="black",
                     zorder=1
                 )
+
+            elif len(p) == 1:
+                centre = p_coords[0]
+
+                # Estimate a sensible radius from the nearest other vertex
+                distances = np.linalg.norm(mapped_coords - centre, axis=1)
+                nonzero_distances = distances[distances > 1e-10]
+
+                if len(nonzero_distances) > 0:
+                    radius = 0.15 * np.min(nonzero_distances)
+                else:
+                    radius = 0.5
+
+                circle = plt.Circle(
+                    centre,
+                    radius,
+                    alpha=0.3,
+                    facecolor=p.colour,
+                    edgecolor="black",
+                    zorder=1
+                )
+
+                plt.gca().add_patch(circle)
+
 
         for e in self.edges:
 
@@ -375,13 +503,9 @@ class Surface:
                 e_coords[:, 0],
                 e_coords[:, 1],
                 "-",
-                c=Surface.PALETTE[e.colour],
+                c=CSSHoneycomb.PALETTE[e.colour],
                 zorder=2
             )
-
-        mapped_coords = coord_map(
-            np.asarray(self.coords, dtype=float)
-        )
 
         plt.scatter(
             mapped_coords[:, 0],

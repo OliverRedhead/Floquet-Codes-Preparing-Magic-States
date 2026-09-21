@@ -45,4 +45,17 @@ class Qubit:
         """redefine hash after it is overriden by __eq__"""
         return hash((type(self).__name__, self.key, self.pos))
 
-    
+
+class Ancilla(Qubit):
+
+    """
+    Qubit subclass for ancilla qubits. These are used to measure two-body stabilizers.
+    Note that not only ancillas are measured, we still need to sort out those single-
+    body measurements on the boundary.
+
+    Not even sure if this will have different methods and attributes, but makes sense
+    to split it up from the general qubit class.
+    """
+
+    def __init__(self, key: int, pos: tuple[float, float]) -> None:
+        super().__init__(key, pos)

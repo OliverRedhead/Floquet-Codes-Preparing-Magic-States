@@ -49,3 +49,17 @@ I have done a bit of work on our Surface class today, we can now set up a circui
 Also started work on operations classes which make our life a little easier when applying detectors and things in our circuit. In the process we have lost the ability to use our circuit in the hexagonal (non-integer) coordinates. If we really want our circuit to work in both systems, we should just be able to set up coordinate maps but will worry about that later. Just note that using our operations on hexagonal coordinates don't work at the moment.
 # 16/9/26
 made some nice progress on boundaries of our code today. Had a meeting where we discussed how these boundaries work, so now have a basic understanding. We can now set up plaquettes on the boundaries which have lower weight than 6. This is important for our detectors. We still face the issues of those single qubit measurements but they are sparse enough that if it comes to it, I am pretty happy to do them sort of manually. I would like to come up with a smart way to make them work though. Next session I should look more at these single qubit measurement.
+# 19/9/26
+Started on some ciruit level stuff. Introduced ancillas as Qubit subclass and wrote function to automatically meausure two-body stabilizers. The pipeline is:
+   1. Initialise relevant ancillas in $\ket{0}$
+   2. If measuring XX stabilizer, apply hadamard to put ancillas in $X$ basis
+   3. Apply CNOTs in the appropriate direction (this needs to be done over two rounds)
+   4. If measuring XX stabilizer, apply hadamard to put ancillas to return to $Z$ basis
+   5. Measure ancilla
+I still havn't worked on the single-body measurements on the boundary. This should be the next step before I develop much more. I don't think this is trivial.
+
+I have a couple ideas on how to implement this.
+   - build edges sticking out from the bulk and make a special case in measurement pipeline if the edge only has a single qubit
+   - Put another layer of plaquettes
+
+I actually think it makes the most sense to set up plaquettes and edges for these single-body stabilizers. This way they should be handled similar to the bulk (hopefully)

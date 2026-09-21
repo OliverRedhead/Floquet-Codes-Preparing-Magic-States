@@ -5,7 +5,7 @@ and help us do some useful strings of operations
 
 import numpy as np
 from homology import ZeroCell, OneCell, TwoCell, ZeroChain, OneChain, TwoChain
-from qubit import Qubit
+from qubit import Qubit, Ancilla
 from collections.abc import Sequence
 
 """
@@ -76,10 +76,15 @@ class Edge(OneCell):
     - An edge is a OneCell defined by the two Vertex instances that it joins.
     - We will use integers as unique keys, although we shouldn't use them (I think).
     - An edge does have a colour, which should be defined by the colour of plaquettes that it bridges.
-
+    - Edges have an ancilla at the middle of the edge
     """
 
-    def __init__(self, key, v0: Vertex, v1: Vertex, colour: str) -> None:
+    def __init__(self, key, v0: Vertex, v1: Vertex, colour: str, ancilla_key: int) -> None:
+        """
+        Notes
+        -----
+        - In creating the ancilla on this edge, we just use the key passed for this edge, this may cause issues.
+        """
         if not isinstance(v0, Vertex) or not isinstance(v1, Vertex):
             raise ValueError(f"Edge must be handed two `Vertex` instances, not v0: {type(v0)} and v1: {type(v1)}")
 
@@ -87,6 +92,14 @@ class Edge(OneCell):
         if colour not in ['red', 'green', 'blue']:
             raise ValueError(f"`colour` must be 'red', 'green', 'blue', not {colour}")
         self.colour = colour
+        
+        # create ancilla
+        x0, y0 = v0.pos
+        x1, y1 = v1.pos
+        xa = (x0 + x1) / 2
+        ya = (y0 + y1) / 2
+        self.ancilla = Ancilla(key=ancilla_key, pos=(xa, ya))
+        
 
     def get_coordinates(self):
         """return coordinates of the vertices that make up this edge as tuple"""
@@ -102,14 +115,17 @@ class Plaquette(TwoCell):
     """
     - A plaquette is a TwoCell defined by the Edge or Vertex instances that make up its boundary.
     - We will use integers as unique keys, although we shouldn't use them (I think)
-    - A plaquetter does have a colour, we will use the convention that the top left hexagon is red,
-        and the hexagon joining it to the lower right is green. This should uniquelly define the 
+    - A plaquette does have a colour, we will use the convention that the top left hexagon is red,
+        and the hexagon joining it to the lower right is green. This should uniquely define the
         colours of our surface.
-    
+
     Note:
     This class allows us to initialise a plaquette given a list of its edges **or** its vertices (not both)
     In either case we compute the other too so a Plaquette instance holds a list of edges and vertices, not
     sure how useful this will be.
+
+    A plaquette that is truncated by the surface boundary (i.e. is missing vertices or edges)
+    should be represented by `BoundaryPlaquette` instead.
     """
 
     def __init__(
@@ -119,7 +135,6 @@ class Plaquette(TwoCell):
         *,
         edges: Sequence[Edge] | None = None,
         vertices: Sequence[Vertex] | None = None,
-        missing_positions: Sequence[tuple[float, float]] | None = None
     ) -> None:
 
         if vertices is not None: # if vertices are specified
@@ -146,7 +161,7 @@ class Plaquette(TwoCell):
                 for edge in candidate_edges
                 if all(v in vertex_set for v in edge.vertices)
             )
-        
+
         elif edges is not None: # if edges are specified
 
             vertex_set = {
@@ -155,6 +170,9 @@ class Plaquette(TwoCell):
                 for vertex in edge.boundary()
                 if isinstance(vertex, Vertex)
             }
+
+            # `vertices` is None on this path, so fill it in from the edges
+            vertices = tuple(vertex_set)
 
         else:
             raise ValueError(
@@ -172,11 +190,9 @@ class Plaquette(TwoCell):
 
         self.colour = colour
 
-        self.missing_positions = tuple(missing_positions) if missing_positions else ()
-
     def __str__(self):
         return f"Plaquette({self.key}) {self.colour}"
-    
+
     def get_ordered_vertices(self) -> tuple["Vertex", ...]:
         """
         Return this plaquette's vertices, ordered anticlockwise around their
@@ -203,6 +219,44 @@ class Plaquette(TwoCell):
 
         return tuple(v.pos for v in self.get_ordered_vertices())
 
+    def __len__(self):
+        """
+        length of a plaquette is the number of vertices it supports
+        """
+        return len(self.vertices)
+
+
+class BoundaryPlaquette(Plaquette):
+    """
+    A special type of plaquette that can contain less than 6 vertices and edges.
+
+    These plaquettes lie on the boundary (hence BoundaryPlaquette).
+    We need some special cases for these to make sure boundary conditions are satisfied.
+
+    Attributes
+    ----------
+    missing_positions:
+        Positions of the vertices that would complete the hexagon but were
+        truncated away by the surface boundary.
+    """
+
+    def __init__(
+        self,
+        key,
+        colour: str,
+        *,
+        edges: Sequence[Edge] | None = None,
+        vertices: Sequence[Vertex] | None = None,
+        missing_positions: Sequence[tuple[float, float]] | None = None,
+    ) -> None:
+        
+        super().__init__(key, colour, edges=edges, vertices=vertices)
+
+        self.missing_positions = tuple(missing_positions) if missing_positions else ()
+
+    def __str__(self):
+        return f"BoundaryPlaquette({self.key}) {self.colour}"
+
     def get_boundary_gap_index(self) -> int | None:
         """
         Return the index i such that the edge between get_ordered_vertices()[i]
@@ -220,10 +274,3 @@ class Plaquette(TwoCell):
                 return i
 
         return None
-    
-    def __len__(self):
-        """
-        length of a plaquette is the number of vertices it supports
-        """
-        return len(self.vertices)
-
