@@ -72,7 +72,7 @@ class CSSHoneycomb:
             if y != 0:  # vertical edge, connects to the vertex above
                 edges.append(make_edge(edges, self.vertices[i - self.ncols], v0))
 
-            if (x + y) % 2 == 0 and x != self.ncols - 1:  # horizontal edge, checkerboard pattern
+            if (x+y) % 2 == 0 and x != self.ncols - 1:  # horizontal edge, checkerboard pattern
                 edges.append(make_edge(edges, v0, self.vertices[i + 1]))
         return edges
 
