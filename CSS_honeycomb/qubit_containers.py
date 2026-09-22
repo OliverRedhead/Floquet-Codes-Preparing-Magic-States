@@ -225,7 +225,6 @@ class Plaquette(TwoCell):
         """
         return len(self.vertices)
 
-
 class BoundaryPlaquette(Plaquette):
     """
     A special type of plaquette that can contain less than 6 vertices and edges.

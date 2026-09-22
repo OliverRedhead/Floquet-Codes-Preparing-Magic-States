@@ -224,15 +224,20 @@ class nChain(ABC):
 
     def __repr__(self) -> str:
         """define how to represent an nChain in debugging"""
-        return f"{type(self).__name__}({set(self.cells)})"
+        return f"{type(self).__name__}({', '.join(map(str, self.cells))})"
     
     def __iter__(self) -> Iterator[nCell]:
         """can iterate over cells in an nChain"""
         return iter(self.cells)
 
+    def __contains__(self, cell):
+        """Return whether a cell belongs to the nChain."""
+        return cell in self.cells
+
     def __len__(self) -> int:
         """length of onechain is the number of cells in our frozenset"""
         return len(self.cells)
+
 
     """abstract methods: boundary and coboundary maps"""
 

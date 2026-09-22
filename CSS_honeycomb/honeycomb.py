@@ -8,8 +8,6 @@ class CSSHoneycomb:
     Responsible for construction, lookup, incidence queries and validation.
     """
 
-    RGB = ['red', 'green', 'blue']
-
     """
     initialisation methods
     """
@@ -195,6 +193,13 @@ class CSSHoneycomb:
 
         return boundary_plaquettes
         
+    def __setup_boundary(self) -> list[Edge] | None:
+        """
+        Walk around the boundary to set up a 
+        """
+        return # TODO
+    
+    
     """
     stim interaction methods
     """
@@ -268,10 +273,62 @@ class CSSHoneycomb:
         else:
             raise ValueError("flavour must be 'X' or 'Z'")
 
+    def _get_boundary_targets(self, colour, flavour):
+        """Helper to get all the single-body measurement targets on the boundary this round.
 
-    def measure_edges(self, colour, flavour="Z"):
+        Parameters
+        ----------
+        colour : str
+            either 'red', 'green' or 'blue'. Determines boundary conditions.
+        flavour : str
+            Either 'X' or 'Z'. Determines boundary conditions.
         """
-        We can pick out all the edges of a certain colour and measure them easily.
+        
+        vertex_coords = {
+            v.pos : v
+            for v in self.vertices
+        }
+        
+        target_vertices = [
+            v
+            for p in self.plaquettes
+            if isinstance(p, BoundaryPlaquette)
+            and p.flavour == flavour
+            and p.colour != colour
+            for v in p.vertices.cells
+        ] + [
+            vertex_coords[(0,0)], 
+            vertex_coords[(self.ncols + self.nrows - 3, self.nrows - 1)]
+        ]
+        
+        targets = []
+        for v in target_vertices:
+            coboundary_colours = [e.colour for e in v.coboundary()]
+            if colour not in coboundary_colours:
+                targets.append(v)
+            
+        return targets
+
+
+    def get_measurement(self, colour: str, flavour: str) -> str:
+        """
+        By specifying a colour and flavour of measurement, we can 
+        measure all edges of the given colour in the basis specified.
+        
+        I want to include boundaries in here too.
+
+        Parameters
+        ----------
+        colour : str
+            either 'red', 'green' or 'blue'. Indicates what colour of edges we should measure.
+        flavour : str
+            Either 'X' or 'Z', indicates the measurement basis. Note that the 'X' circuit is a 
+            little bit longer.
+
+        Returns
+        -------
+        circuit string : str
+            A string in `stim` syntax that we can pass directly in. Should be commented adequately too.
         """
         string = ""
 
@@ -313,9 +370,13 @@ class CSSHoneycomb:
             string += "\nTICK\n"
 
         # measure ancillas
-        string += "M "
+        string += f"#{colour}{flavour} edges\nM "
         for a in ancilla_keys:
             string += str(a) + " "
+        
+        # measure boundary    
+        string += f"#{colour}{flavour} boundary\nM"
+        
     
         return string
 
@@ -383,7 +444,6 @@ class CSSHoneycomb:
             missing_positions=missing_positions,
             flavour=flavour,
         )
-
 
     @staticmethod
     def square_to_hex(coords, scale=1):
@@ -456,9 +516,9 @@ class CSSHoneycomb:
         'red' : '#e74c3c', 
         'green' : '#2ecc71',
         'blue' : '#3498db', 
-               }
+    }
 
-    def plot_surface(self, coordinates="square", bulge=0.35, n_arc=16, savepath = None):
+    def plot_surface(self, coordinates="square", bulge=0.35, n_arc=16, savepath = None, show=True):
 
         """Visualise the surface."""
 
@@ -613,7 +673,8 @@ class CSSHoneycomb:
         if savepath is not None:
             plt.savefig(savepath)
 
-        plt.show()
+        if show:
+            plt.show()
 
     @staticmethod
     def __bulge_boundary_edge(p_coords, gap_index, outward_dir, bulge, n_arc=16):
