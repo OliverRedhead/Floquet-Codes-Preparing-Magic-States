@@ -213,8 +213,8 @@ class Plaquette(TwoCell):
     def get_coordinates(self, ordered=False) -> tuple[tuple[float, float], ...]:
         """Return coordinates of the unique vertices making up these edges."""
         if not ordered:
-            vertices = {v for v in self.vertices}
-            coords = np.array([v.pos for v in vertices], dtype=float)
+            vertices = {v for v in self.vertices if isinstance(v, Vertex)}
+            coords = np.array([v.get_coordinates() for v in vertices], dtype=float)
             return tuple(map(tuple, coords))
 
         return tuple(v.pos for v in self.get_ordered_vertices())
@@ -248,11 +248,13 @@ class BoundaryPlaquette(Plaquette):
         edges: Sequence[Edge] | None = None,
         vertices: Sequence[Vertex] | None = None,
         missing_positions: Sequence[tuple[float, float]] | None = None,
+        flavour: str | None = None
     ) -> None:
         
         super().__init__(key, colour, edges=edges, vertices=vertices)
 
         self.missing_positions = tuple(missing_positions) if missing_positions else ()
+        self.flavour = flavour
 
     def __str__(self):
         return f"BoundaryPlaquette({self.key}) {self.colour}"

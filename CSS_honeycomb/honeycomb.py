@@ -39,6 +39,7 @@ class CSSHoneycomb:
         self.vertices = self.__initialise_vertices()
         self.edges = self.__initialise_edges()
         self.plaquettes = self.__initialise_plaquettes()
+        self.plaquettes += self.__initialise_boundary_plaquettes()
     
     def __initialise_vertices(self) -> list[Vertex]:
         """Initialise vertices, note that data qubits are initialised in this step too"""
@@ -158,6 +159,42 @@ class CSSHoneycomb:
 
         return plaquettes
 
+    def __initialise_boundary_plaquettes(self) -> list[BoundaryPlaquette]:
+        """Initialise the plaquettes along all four boundaries.
+
+        The top/bottom boundaries carry Z-flavoured plaquettes, the
+        left/right boundaries carry X-flavoured ones. Each boundary is
+        just a list of (x, y) anchor points, so they all share the same
+        plaquette-building loop below.
+        """
+        vertex_coords = {
+        vertex.get_coordinates(): vertex
+        for vertex in self.vertices
+        }
+
+        offsets = [(0, 0), (1, 0), (2, 0), (2, 1), (1, 1), (0, 1)]
+
+        boundaries = [
+            ("Z", [(x, -1) for x in range(1, self.ncols - 2, 2)]),                       # top
+            ("Z", [(x, self.nrows - 1) for x in range(self.nrows - 1, self.ncols + self.nrows - 4, 2)]),  # bottom
+            ("X", [(y - 2, y) for y in range(1, self.nrows - 1)]),                       # left
+            ("X", [(self.ncols - 1 + y, y) for y in range(0, self.nrows - 2)]),               # right
+        ]
+
+        boundary_plaquettes = []
+
+        for flavour, anchors in boundaries:
+            for x, y in anchors:
+                plaquette = CSSHoneycomb.__make_boundary_plaquette(
+                    x, y, vertex_coords, offsets,
+                    index=len(self.plaquettes) + len(boundary_plaquettes),
+                    flavour=flavour,
+                )
+                if plaquette is not None:
+                    boundary_plaquettes.append(plaquette)
+
+        return boundary_plaquettes
+        
     """
     stim interaction methods
     """
@@ -322,6 +359,33 @@ class CSSHoneycomb:
         return rgb[x % 3]
 
     @staticmethod
+    def __make_boundary_plaquette(x, y, vertex_coords, offsets, index, flavour):
+        """Build a single boundary plaquette anchored at (x, y).
+
+        Returns None if none of the plaquette's vertices exist in
+        `vertex_coords` (i.e. it would be entirely off-grid).
+        """
+        positions = [(x + dx, y + dy) for dx, dy in offsets]
+        candidates = [vertex_coords.get(pos) for pos in positions]
+
+        boundary_vertices = [v for v in candidates if v is not None]
+        if not boundary_vertices:
+            return None
+
+        missing_positions = [
+            pos for pos, v in zip(positions, candidates) if v is None
+        ]
+
+        return BoundaryPlaquette(
+            index,
+            colour=CSSHoneycomb.__colour_plaquette(x),
+            vertices=boundary_vertices,
+            missing_positions=missing_positions,
+            flavour=flavour,
+        )
+
+
+    @staticmethod
     def square_to_hex(coords, scale=1):
 
         coords = np.asarray(coords, dtype=float)
@@ -337,16 +401,16 @@ class CSSHoneycomb:
         x = coords[:, 0].copy()
         y = coords[:, 1].copy()
 
-        even = (y % 2 == 0)
+        even = (x % 2 == 0)
 
-        x[even] += 2 * a * (x[even] // 2)
+        y[even] += 2 * a * (y[even] // 2)
 
-        x[~even] += (
-            a * ((x[~even] + 1) // 2)
-            + a * ((x[~even] - 1) // 2)
+        y[~even] += (
+            a * ((y[~even] + 1) // 2)
+            + a * ((y[~even] - 1) // 2)
         )
 
-        y *= 2 * a
+        x *= 2 * a
 
         return np.column_stack((x, y)) * scale
 
@@ -394,7 +458,7 @@ class CSSHoneycomb:
         'blue' : '#3498db', 
                }
 
-    def plot_surface(self, coordinates="square", bulge=0.35, n_arc=16):
+    def plot_surface(self, coordinates="square", bulge=0.35, n_arc=16, savepath = None):
 
         """Visualise the surface."""
 
@@ -545,6 +609,9 @@ class CSSHoneycomb:
 
         plt.axis("equal")
         plt.gca().yaxis.set_inverted(True)
+        
+        if savepath is not None:
+            plt.savefig(savepath)
 
         plt.show()
 
