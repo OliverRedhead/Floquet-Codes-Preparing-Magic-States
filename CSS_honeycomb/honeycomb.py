@@ -36,97 +36,125 @@ class CSSHoneycomb:
         self.nrows = nrows
         self.ncols = ncols
 
-        self.coords, self.vertices = self.__initialise_vertices()
+        self.vertices = self.__initialise_vertices()
         self.edges = self.__initialise_edges()
         self.plaquettes = self.__initialise_plaquettes()
-
-    def __initialise_vertices(self) -> tuple[list[tuple[int, int]], list[Vertex]]:
+    
+    def __initialise_vertices(self) -> list[Vertex]:
         """Initialise vertices, note that data qubits are initialised in this step too"""
-        coords = [
-            (x, y)
-            for y in range(self.nrows) 
-            for x in range(self.ncols)
-            ]
-        
-        vertices = [
-            Vertex(i, pos) 
-            for i, pos in enumerate(coords)
-            ]
-        return coords, vertices
+
+        vertices = []
+        key = 0
+
+        for y in range(self.nrows):
+            n_vertices = self.ncols if y in (0, self.nrows - 1) else self.ncols + 1
+
+            for x in range(n_vertices):
+                x_pos = x + y - 1 if y > 0 else x
+
+                vertices.append(
+                    Vertex(key, (x_pos, y))
+                )
+
+                key += 1
+
+        return vertices
 
     def __initialise_edges(self) -> list[Edge]:
         """
-        Initialise edges, needs to be called after vertices are initialised.
-        An edge is defined by the two vertices it joins.
+        Initialise edges.
+
+        Must be called after vertices have been initialised.
+        Each edge is defined by the two vertices it joins.
         """
-        
-        def make_edge(edges, v0, v1):
-            colour = CSSHoneycomb.__colour_edge(v0.pos[1], v1.pos[1])
-            ancilla_key = len(self.vertices) + len(edges)
-            return Edge(len(edges), v0=v0, v1=v1, colour=colour, ancilla_key=ancilla_key)
 
         edges = []
+
+        def make_edge(v0: Vertex, v1: Vertex, direction: str) -> Edge:
+            edge_key = len(edges)
+            colour = CSSHoneycomb.__colour_edge(v0.pos[0], direction)
+            ancilla_key = len(self.vertices) + edge_key
+
+            return Edge(
+                edge_key,
+                v0=v0,
+                v1=v1,
+                colour=colour,
+                ancilla_key=ancilla_key
+            )
+
         for i, v0 in enumerate(self.vertices):
             x, y = v0.pos
 
-            if y != 0:  # vertical edge, connects to the vertex above
-                edges.append(make_edge(edges, self.vertices[i - self.ncols], v0))
+            # Vertical edge
+            if y < self.nrows - 1 and (x + y) % 2 == 0:
+                v1 = self.vertices[i + self.ncols]
+                edges.append(make_edge(v0, v1, "vertical"))
 
-            if (x+y) % 2 == 0 and x != self.ncols - 1:  # horizontal edge, checkerboard pattern
-                edges.append(make_edge(edges, v0, self.vertices[i + 1]))
+            # Horizontal edge
+            if x < self.ncols + y - 1:
+                # Last vertex of the bottom row has no horizontal neighbour
+                if y == self.nrows - 1 and x == self.ncols + self.nrows - 3:
+                    continue
+
+                v1 = self.vertices[i + 1]
+                edges.append(make_edge(v0, v1, "horizontal"))
+
         return edges
 
     def __initialise_plaquettes(self) -> list[Plaquette]:
         """
-        Initialise plaquettes, needs to be called after vertices are initialised.
-        A plaquette is built starting from the qubit in the top left (closest to (0,0)).
-        Anchors are allowed to sit one step outside the grid (x=-1 or y=-1) so that
-        boundary plaquettes on the left/top are generated too, truncated to whichever
-        of the 6 vertices actually exist.
+        Initialise plaquettes.
+
+        Must be called after vertices have been initialised.
+        Each plaquette is defined by the six vertices around it.
         """
 
-        def get_vertex(x, y):
-            if 0 <= x < self.ncols and 0 <= y < self.nrows:
-                return self.vertices[y * self.ncols + x]
-            return None
+        vertex_coords = {
+            v.get_coordinates(): v
+            for v in self.vertices
+        }
 
-        offsets = [(0, 0), (1, 0), (0, 1), (1, 1), (0, 2), (1, 2)]
+        offsets = [
+            (0, 0),
+            (1, 0),
+            (2, 0),
+            (2, 1),
+            (1, 1),
+            (0, 1)
+        ]
 
         plaquettes = []
 
-        for y in range(-2, self.nrows):
-            for x in range(-1, self.ncols):
-                if (x + y) % 2 != 0:
-                    continue
+        for (x, y) in vertex_coords:
 
-                candidates = [get_vertex(x + dx, y + dy) for dx, dy in offsets]
-                vertices = [v for v in candidates if v is not None]
-                missing_positions = [
-                    (x + dx, y + dy)
-                    for (dx, dy), v in zip(offsets, candidates)
-                    if v is None
-                ]
+            # Only consider one sublattice of possible plaquette origins
+            if (x + y) % 2 == 1:
+                continue
 
-                if not vertices:
-                    continue
+            positions = [
+                (x + dx, y + dy)
+                for dx, dy in offsets
+            ]
 
-                colour = CSSHoneycomb.__colour_plaquette(y)
+            # Skip positions where the complete plaquette does not exist
+            if not all(pos in vertex_coords for pos in positions):
+                continue
 
-                if missing_positions:
-                    plaquette = BoundaryPlaquette(
-                        len(plaquettes),
-                        colour=colour,
-                        vertices=vertices,
-                        missing_positions=missing_positions,
-                    )
-                else:
-                    plaquette = Plaquette(
-                        len(plaquettes),
-                        colour=colour,
-                        vertices=vertices,
-                    )
+            vertices = [
+                vertex_coords[pos]
+                for pos in positions
+            ]
 
-                plaquettes.append(plaquette)
+            colour = CSSHoneycomb.__colour_plaquette(x)
+
+            plaquettes.append(
+                Plaquette(
+                    key=len(plaquettes),
+                    colour=colour,
+                    vertices=vertices
+                )
+            )
 
         return plaquettes
 
@@ -276,22 +304,22 @@ class CSSHoneycomb:
     """
 
     @staticmethod
-    def __colour_plaquette(y):
+    def __colour_plaquette(x):
         """
-        for colouring plaquettes. Very simple condition in our choice of square coordinates
+        Helper for colouring plaquettes.
         """
-        index = int(y%3)
-        return CSSHoneycomb.RGB[index]
+        brg = ['blue', 'red', 'green']
+        return brg[x%3]
     
     @staticmethod
-    def __colour_edge(y0, y1):
+    def __colour_edge(x, direction):
         """
-        For colouring edges. Very simple condition in our choice of square coordinates.
+        Helper for colouring edges. 
         """
         rgb = ['red', 'green', 'blue']
-        if y0 == y1:
-            return rgb[int((y1 - 1) % 3)]
-        return rgb[int( (y0 + 1) % 3 )]
+        if direction == "vertical":
+            return rgb[(x + 1) % 3]
+        return rgb[x % 3]
 
     @staticmethod
     def square_to_hex(coords, scale=1):
@@ -394,8 +422,9 @@ class CSSHoneycomb:
                 )
             )
 
+            coords = np.array([v.get_coordinates() for v in self.vertices])
             mapped_coords = coord_map(
-               np.asarray(self.coords, dtype=float)
+               np.asarray(coords, dtype=float)
             )
 
             if len(p) == 6:
