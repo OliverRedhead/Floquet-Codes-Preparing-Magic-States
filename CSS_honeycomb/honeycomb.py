@@ -273,7 +273,7 @@ class CSSHoneycomb:
         else:
             raise ValueError("flavour must be 'X' or 'Z'")
 
-    def _get_boundary_targets(self, colour, flavour):
+    def __get_boundary_targets(self, colour, flavour):
         """Helper to get all the single-body measurement targets on the boundary this round.
 
         Parameters
@@ -307,7 +307,7 @@ class CSSHoneycomb:
             if colour not in coboundary_colours:
                 targets.append(v)
             
-        return targets
+        return list(set(targets))
 
 
     def get_measurement(self, colour: str, flavour: str) -> str:
@@ -329,11 +329,18 @@ class CSSHoneycomb:
         -------
         circuit string : str
             A string in `stim` syntax that we can pass directly in. Should be commented adequately too.
+            
+        Notes
+        -----
+        Our single qubits spend some time idling here. I'm not sure how avoidable this is.
         """
         string = ""
 
         target_edges = [e for e in self.edges if e.colour == colour]
         ancilla_keys = [e.ancilla.key for e in target_edges]
+        
+        target_vertices = self.__get_boundary_targets(colour, flavour)
+        vertex_keys = [v.key for v in target_vertices]
 
         # Initialise ancillas in |0>
         string += f"# prepare ancillas in {flavour} basis\nR "
@@ -341,11 +348,11 @@ class CSSHoneycomb:
             string += str(a) + " "
         string += "\nTICK\n"
         
-        # If measuring X stabilizer, put ancillas X basis
+        # If measuring X stabilizer, put ancillas in X basis
         if flavour == "X":
             string += "H "      # Hadamard
             for a in ancilla_keys:
-                string += str(a) + " "
+                string += str(a) + " "                
             string += "\nTICK\n"
 
         # First round of CNOTs between v0 and ancilla
@@ -375,8 +382,11 @@ class CSSHoneycomb:
             string += str(a) + " "
         
         # measure boundary    
-        string += f"#{colour}{flavour} boundary\nM"
-        
+        # NOTE Im not sure how to do this without using MX gates.
+        if vertex_keys:
+            string += f"\n#{colour}{flavour} boundary\nM{flavour} "
+            for v in vertex_keys:
+                string += str(v) + " "
     
         return string
 
