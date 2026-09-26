@@ -1,6 +1,5 @@
 from qubit import Qubit
 import numpy as np
-from qubit_containers import Plaquette
 
 """
 Detectors in stim are set on measurements, stim holds measurements as just an ordered list
@@ -91,8 +90,6 @@ class Gate(Operation):
         return hash((type(self).__name__, self.target.key, self.time))
     
 
-
-
 """specific gate classes"""
 
 class Reset(Gate):
@@ -109,11 +106,14 @@ class Hadamard(Gate):
     def __init__(self, target: Qubit, time: int) -> None:
         super().__init__(target, time)
 
+
+# TODO may add colour attribute to measurement
+
 class Measurement(Gate):
 
     OPERATION = "M"
 
-    def __init__(self, target: Qubit, time: int, flavour: str = "Z") -> None:
+    def __init__(self, target: Qubit, time: int, flavour: str) -> None:
         
         if flavour not in ['X', 'Y', 'Z']:
             raise ValueError(f"measurement.flavour must be 'X', 'Y' or 'Z', not {flavour}")
@@ -133,8 +133,6 @@ class Measurement(Gate):
         """
         return hash((type(self).__name__, self.target.key, self.time, self.flavour))
         
-        
-
 class Cnot(Gate):
     
     """
@@ -180,29 +178,145 @@ class Detector(Operation):
     Detectors make our life much more difficult.
     """
 
-    def __init__(self, pos: tuple[int, int], time: int, rec: list[int]) -> None:
+    def __init__(
+        self, 
+        open_meas: list[Measurement] | None, 
+        close_meas: list[Measurement] | None, 
+        colour: str, 
+        *, 
+        flavour: str | None = None,
+        open_time: int | None = None, 
+        close_time: int | None = None
+    ) -> None:
         """
         Initialise a Detectors instance.
 
         Parameters
         ----------
-        pos : tuple[int, int]
-            We need to specify a position. Note that this may not work in hexagonal coordinates.
-        time : int
-            We need to specify temporal location too.
-        rec : list[int]
-            This will be a list of negative integers which point stim to the correct measurements
-            to compare. This is the difficult bit that requires us to keep a list of measurements
-            in our circuits.
+        open : list[Measurement] | None
+            list of measurements that create syndrome at start of detector cell            
+        close : list[Measurement] | None
+            list of measurements that create syndrome at end of detector cell
+        colour : str
+            colour of detector cell
+        flavour : str | None = None
+            optional. flavour of detector cell, if not specified it is calculated.
+        open_time : int | None = None
+            optional. open time of detector cell, if not specified it is calculated.
+        close_time : int | None = None
+            optional. close time of detector cell, if not specified it is calculated.
         """
-        self.pos = pos
-        self.rec = rec
-        super().__init__(time)
+        
+        open_meas = open_meas if open_meas is not None else []
+        close_meas = close_meas if close_meas is not None else []
+        
+        self.open = open_meas
+        self.close = close_meas
+        self.colour = colour
+        
+        if open_time is not None:
+            close_time = open_time + 4
+        elif close_time is not None:
+            open_time = close_time - 4
+            
+            if open_time < 0:
+                raise NotImplementedError("You need to catch these detectors cells that open before our code starts!")
+            
+        else:
+            if not (open_meas or close_meas):
+                raise ValueError("Must specify at least one: open_meas, close_meas, open_time, close_time")
+            
+            open_time = open_meas[0].time if open_meas else close_meas[0].time - 4
+            close_time = close_meas[0].time if close_meas else open_meas[0].time + 4
+            
+            if close_time - open_time != 4:
+                raise NotImplementedError(f"Time on measurements does not work with our code.\
+                                          opened at {open_time} and closed at {close_time} is not allowed.")
+        
+        # set open and close time attribute
+        self.open_time = open_time
+        self.close_time = close_time
 
-    def __str__(self) -> str:
-        """Let's us send a detector instance straight into stim."""
-        x,y = self.pos
-        string = f"DETECTOR({x},{y},{self.time})"
-        for r in self.rec:
-            string += f" rec[{r}]"
-        return string
+        # set flavour attribute
+        if flavour is None:
+            # should have handled the case where both of these are empty already
+            if open_meas: 
+                self.flavour = open_meas[0].flavour
+            else:
+                self.flavour = close_meas[0].flavour
+        else:
+            self.flavour = flavour
+        
+        # make sure all measurements have same flavour.
+        for m in open_meas + close_meas:
+            if m.flavour != self.flavour:
+                raise NotImplementedError("Measurement cannot have different flavour to Detector.")
+
+        super().__init__(open_time)
+        
+    def is_valid(self):
+        """
+        returns bool if this is a valid detector. I originally set this up just to check the validity, 
+        but may as well make sure everything is working properly while we are checking things.
+        
+        NOTE This may slow our generation down a bit so might be worth removing once we get things running.
+        Also could just make this an attribute that gets updated everytime we add new measurement.
+        """
+        # 1. must have same number of open and close measurements.
+        if (len(self.open) != len(self.close)) or (len(self.open) == 0):
+            return False
+        
+        # 2. Measurements all have the same flavour.
+        for m in self.open + self.close:
+            if m.flavour != self.flavour:
+                raise NotImplementedError("Measurement cannot have different flavour to Detector.")
+    
+        # 3. Measurements in open and close must occur at same respective non-negative time-steps
+        for m in self.open:
+            if m.time != self.open_time:
+                raise NotImplementedError(f"Measurements in detector open must all be taken at the same time step.")
+            if m.time < 0:
+                return False
+            
+        for m in self.close:
+            if m.time != self.close_time:
+                raise NotImplementedError(f"Measurements in detector close must all be taken at the same time step.")
+            if m.time < 0:
+                raise ValueError("Somehow we have set up a measurement that closes before time starts.")
+        
+        
+    def add_measurement(self, m: Measurement, end: str):
+        """add a measurement to this detector
+
+        Parameters
+        ----------
+        m : Measurement
+            measurement object to add to this detector.
+        end : str
+            which end of the detector cell to add the measurement. 'open' or 'close'.
+        """
+        
+        if m.flavour != self.flavour:
+            raise NotImplementedError("Measurement cannot have different flavour to Detector.")
+        
+        if end == "open":
+            if m.time != self.open_time:
+                raise NotImplementedError(f"Measurements in detector open must all be taken at the same time step.")
+            
+            self.open.append(m)
+            
+        elif end == "close":
+            if m.time != self.close_time:
+                raise NotImplementedError(f"Measurements in detector close must all be taken at the same time step.")
+            
+            self.close.append(m)
+            
+        else:
+            raise NotImplementedError(f"end must be 'open' or 'close', not {end}")
+        
+        
+    def get_pos(self):
+        """Compute the detector position as the COM of its qubits."""
+        # TODO make sure this works
+        return np.mean([m.target.pos for m in self.open], axis=0)
+            
