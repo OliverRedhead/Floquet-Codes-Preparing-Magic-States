@@ -1,6 +1,7 @@
 import numpy as np
 import matplotlib.pyplot as plt
 from qubit_containers import Vertex, Edge, Plaquette, BoundaryPlaquette
+from operations import Measurement
 
 class CSSHoneycomb:
     """
@@ -38,6 +39,8 @@ class CSSHoneycomb:
         self.edges = self.__initialise_edges()
         self.plaquettes = self.__initialise_plaquettes()
         self.plaquettes += self.__initialise_boundary_plaquettes()
+        self.measurements = []
+        self.clock = 0
     
     def __initialise_vertices(self) -> list[Vertex]:
         """Initialise vertices, note that data qubits are initialised in this step too"""
@@ -193,12 +196,6 @@ class CSSHoneycomb:
 
         return boundary_plaquettes
         
-    def __setup_boundary(self) -> list[Edge] | None:
-        """
-        Walk around the boundary to set up a 
-        """
-        return # TODO
-    
     
     """
     stim interaction methods
@@ -233,6 +230,11 @@ class CSSHoneycomb:
             string += f"QUBIT_COORDS({x}, {y}) {i}\n"
         return string
 
+    def tick(self) -> str:
+        """increase the clock and return the stim TICK command"""
+        self.clock += 1
+        return "\nTICK\n"
+    
     # measurement protocol
 
     @staticmethod
@@ -309,6 +311,129 @@ class CSSHoneycomb:
             
         return list(set(targets))
 
+    """
+    This dictionary holds the detector cell schedule. It is of the form
+           dict[ tuple[str] : dict[ str : str ] ]
+    The first dimension is to call on the measurement flavour and colour.
+    For example, if we are measuring gXX this round, we might call
+        syndrome = SYNDOME_SCHEDULE[('green', 'X')]
+    this would give us another dictionary of the form
+            dict[str : str].
+    Now we can find what colour detector cells **open** and **close** with those keywords.
+    """
+    SYNDOME_SCHEDULE = {
+        ('red', 'Z')    : {'open' : 'blue',  'close' : 'green'},
+        ('green', 'X')  : {'open' : 'red',   'close' : 'blue'},
+        ('blue', 'Z')   : {'open' : 'green', 'close' : 'red'},
+        ('red', 'X')    : {'open' : 'blue',  'close' : 'green'},
+        ('green', 'Z')  : {'open' : 'red',   'close' : 'blue'},
+        ('blue', 'X')   : {'open' : 'green', 'close' : 'red'},
+    }
+
+
+    def __record_measurements(self, colour, flavour, target_edges, target_vertices):
+        """Record measurements for bulk and boundary plaquettes.
+
+        Parameters
+        ----------
+        colour : str
+            'red', 'green' or 'blue'. Colour of edge measurements this round.
+        flavour : str
+            'X' or 'Z'. Flavour of edge measureremenets this round.
+        target_edges : list[Edge]
+            list of target edges measured this round, produced by get_measurement() method
+        target_vertices : list[Vertex]
+            list of target vertices measured this round, produced by get_measurement() method
+        """
+
+        open_colour = CSSHoneycomb.SYNDOME_SCHEDULE[(colour, flavour)]['open']
+        close_colour = CSSHoneycomb.SYNDOME_SCHEDULE[(colour, flavour)]['close']
+
+        # construct plaquettes in bulk with edges.
+        for edge in target_edges:
+            p_chain = edge.coboundary()
+
+            for p in p_chain:
+                if p.colour == open_colour:
+                    m = Measurement(edge.ancilla, self.clock, flavour)
+                    p.add_measurement(m, "open") 
+                    
+                elif p.colour == close_colour:
+                    m = Measurement(edge.ancilla, self.clock, flavour)
+                    p.add_measurement(m, "close") 
+
+                else:
+                    continue
+
+                self.measurements.append(m)
+
+        # construct boundary plaquettes with single qubit measurements where applicable.
+
+        for vertex in target_vertices:
+            e_chain = vertex.coboundary()
+            
+            for edge in e_chain:
+                p_chain = edge.coboundary()
+                for p in p_chain:
+
+                    if not isinstance(p, BoundaryPlaquette):
+                        continue
+
+                    if p.colour == open_colour:
+                        m = Measurement(edge.ancilla, self.clock, flavour)
+                        p.add_measurement(m, "open") 
+
+                    elif p.colour == close_colour:
+                        m = Measurement(edge.ancilla, self.clock, flavour)
+                        p.add_measurement(m, "close") 
+
+                    else:
+                        continue
+
+                    self.measurements.append(m)
+                    
+                        
+    def get_detectors(self, time):
+        """Get a list of the valid detectors that close at the given time step."""
+        detectors = []
+        for p in self.plaquettes:
+            d = p.detector_closes(time)
+            if d is not None:
+                detectors.append(d)
+            
+        return detectors
+    
+    def write_detectors(self, detectors, time) -> str:
+        """Given a list of valid detectors, write them in stim.
+        
+        Parameters
+        ----------
+        detectors : list[Detector]
+            list of valid detectors.
+            
+        Returns 
+        -------
+        detector_string : str
+            Detector string to pass to stim.
+        """
+        
+        def find_measurement_index(m : Measurement):
+            """find the rec index of a target measurement in the self.measurements list"""
+            idx = self.measurements.index(m)
+            return idx - len(self.measurements)
+        
+        detector_string = ""
+        for d in detectors:
+            x,y = d.get_pos()
+            detector_string += f"Detector({x}, {y}, {time}) "
+            for m in d.open + d.close:
+                idx = find_measurement_index(m)
+                detector_string += f"rec[{idx}] "
+            
+            detector_string += "\n"
+        
+        return detector_string
+                
 
     def get_measurement(self, colour: str, flavour: str) -> str:
         """
@@ -346,35 +471,35 @@ class CSSHoneycomb:
         string += f"# prepare ancillas in {flavour} basis\nR "
         for a in ancilla_keys:
             string += str(a) + " "
-        string += "\nTICK\n"
+        string += self.tick()
         
         # If measuring X stabilizer, put ancillas in X basis
         if flavour == "X":
             string += "H "      # Hadamard
             for a in ancilla_keys:
                 string += str(a) + " "                
-            string += "\nTICK\n"
+            string += self.tick()
 
         # First round of CNOTs between v0 and ancilla
         string += "# fold stabilizers\nCNOT "
         for edge in target_edges:
             c, t = CSSHoneycomb.__get_CNOTs(edge, flavour=flavour, r=0)
             string += f"{c} {t} "
-        string += "\nTICK\n"
+        string += self.tick()
 
         # Second round of CNOTs between v1 and ancilla
         string += "CNOT "
         for edge in target_edges:
             c, t = CSSHoneycomb.__get_CNOTs(edge, flavour=flavour, r=1)
             string += f"{c} {t} "
-        string += "\nTICK\n"
+        string += self.tick()
 
         # If measuring X stabilizer, put ancillas back in Z basis
         if flavour == "X":
             string += "# rotate ancillas back to Z basis\nH "
             for a in ancilla_keys:
                 string += str(a) + " "
-            string += "\nTICK\n"
+            string += self.tick()
 
         # measure ancillas
         string += f"#{colour}{flavour} edges\nM "
@@ -383,10 +508,16 @@ class CSSHoneycomb:
         
         # measure boundary    
         # NOTE Im not sure how to do this without using MX gates.
+        # Other than just making qubits idle for a while.
         if vertex_keys:
             string += f"\n#{colour}{flavour} boundary\nM{flavour} "
             for v in vertex_keys:
                 string += str(v) + " "
+                
+        self.__record_measurements(colour, flavour, target_edges, target_vertices) # NOTE not sure if I need colour here
+        
+        detectors = self.get_detectors(self.clock)
+        string += self.write_detectors(detectors, self.clock)
     
         return string
 
