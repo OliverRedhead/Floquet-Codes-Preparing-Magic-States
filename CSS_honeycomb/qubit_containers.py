@@ -7,6 +7,7 @@ import numpy as np
 from homology import ZeroCell, OneCell, TwoCell, ZeroChain, OneChain, TwoChain
 from qubit import Qubit, Ancilla
 from collections.abc import Sequence
+from operations import Measurement, Detector
 
 """
 nCell subclasses to hold coordinates and colour information as well as inherit all the 
@@ -43,7 +44,8 @@ class Vertex(ZeroCell):
         - vertex key and qubit key **must** match, else we will have problems with stim.
 
         """
-        assert isinstance(key, (int, type(None))), f"Vertex.key must be `int` or `None`. Not {type(key)}"
+        if not isinstance(key, (int, type(None))):
+            raise ValueError(f"Vertex.key must be `int` or `None`. Not {type(key)}")
     
     
         # qubit key must be integer in stim
@@ -109,6 +111,8 @@ class Edge(OneCell):
     def get_indices(self):
         v0, v1 = self.boundary()
         return v0.key, v1.key
+
+# TODO check datastructure to hold measurements
 
 class Plaquette(TwoCell):
 
@@ -189,6 +193,7 @@ class Plaquette(TwoCell):
             )
 
         self.colour = colour
+        self.detectors : list[Detector] = []
 
     def __str__(self):
         return f"Plaquette({self.key}) {self.colour}"
@@ -224,6 +229,45 @@ class Plaquette(TwoCell):
         length of a plaquette is the number of vertices it supports
         """
         return len(self.vertices)
+    
+    def add_measurement(self, m: Measurement, end: str):
+        """
+        Add a measurement to this plaquette, attaching it to an existing
+        detector if one is awaiting this measurement, or starting a new
+        detector otherwise.
+
+        Parameters
+        ----------
+        m : Measurement
+            the measurement to add
+        end : str
+            'open' or 'close' - which end of a detector cell this measurement forms
+        """
+
+        for d in self.detectors:
+            if d.flavour != m.flavour:
+                continue
+
+            if end == "open" and d.open_time == m.time and not d.open:
+                d.add_measurement(m, end)
+                return
+
+            if end == "close" and d.close_time == m.time and not d.close:
+                d.add_measurement(m, end)
+                return
+
+        # no existing detector matched - start a new one
+        open_meas = [m] if end == "open" else []
+        close_meas = [m] if end == "close" else []
+        d = Detector(open_meas, close_meas, self.colour)
+        self.detectors.append(d)
+                
+    def detector_closes(self, time): # TODO check what this does
+        """I genuinely dont remember writing this."""
+        for d in self.detectors:
+            if d.close_time == time and d.is_valid():
+                return d
+                
 
 class BoundaryPlaquette(Plaquette):
     """
