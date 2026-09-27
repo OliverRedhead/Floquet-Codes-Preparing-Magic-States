@@ -40,7 +40,12 @@ class CSSHoneycomb:
         self.plaquettes = self.__initialise_plaquettes()
         self.plaquettes += self.__initialise_boundary_plaquettes()
         self.measurements = []
+        
+        # This counts our circuit level ticks
         self.clock = 0
+        
+        # This counts ISG updates
+        self.isg_clock = 0
     
     def __initialise_vertices(self) -> list[Vertex]:
         """Initialise vertices, note that data qubits are initialised in this step too"""
@@ -235,6 +240,10 @@ class CSSHoneycomb:
         self.clock += 1
         return "\nTICK\n"
     
+    def isg_tick(self) -> None:
+        """increment isg clock"""
+        self.isg_clock += 1
+    
     # measurement protocol
 
     @staticmethod
@@ -351,53 +360,40 @@ class CSSHoneycomb:
 
         # construct plaquettes in bulk with edges.
         for edge in target_edges:
-            p_chain = edge.coboundary()
+            m = Measurement(edge.ancilla, self.clock, flavour)
+            self.measurements.append(m)          # once per real M instruction
 
-            for p in p_chain:
+            for p in edge.coboundary():
                 if p.colour == open_colour:
-                    m = Measurement(edge.ancilla, self.clock, flavour)
-                    p.add_measurement(m, "open") 
-                    
+                    p.add_measurement(m, self.isg_clock, "open")
                 elif p.colour == close_colour:
-                    m = Measurement(edge.ancilla, self.clock, flavour)
-                    p.add_measurement(m, "close") 
-
-                else:
-                    continue
-
-                self.measurements.append(m)
+                    p.add_measurement(m, self.isg_clock, "close")
 
         # construct boundary plaquettes with single qubit measurements where applicable.
 
         for vertex in target_vertices:
-            e_chain = vertex.coboundary()
-            
-            for edge in e_chain:
-                p_chain = edge.coboundary()
-                for p in p_chain:
+            m = Measurement(vertex, self.clock, flavour)
+            self.measurements.append(m)
 
+            for edge in vertex.coboundary():
+                for p in edge.coboundary():
                     if not isinstance(p, BoundaryPlaquette):
                         continue
-
                     if p.colour == open_colour:
-                        m = Measurement(edge.ancilla, self.clock, flavour)
-                        p.add_measurement(m, "open") 
-
+                        p.add_measurement(m, self.isg_clock, "open")
                     elif p.colour == close_colour:
-                        m = Measurement(edge.ancilla, self.clock, flavour)
-                        p.add_measurement(m, "close") 
+                        p.add_measurement(m, self.isg_clock, "close")
 
-                    else:
-                        continue
-
-                    self.measurements.append(m)
-                    
-                        
-    def get_detectors(self, time):
+                              
+    def get_detectors(self):
         """Get a list of the valid detectors that close at the given time step."""
         detectors = []
         for p in self.plaquettes:
-            d = p.detector_closes(time)
+            
+            # NOTE debugging
+            c = p.colour
+            
+            d = p.detector_closes(self.isg_clock)
             if d is not None:
                 detectors.append(d)
             
@@ -422,18 +418,17 @@ class CSSHoneycomb:
             idx = self.measurements.index(m)
             return idx - len(self.measurements)
         
-        detector_string = ""
+        detector_string = "\n"
         for d in detectors:
             x,y = d.get_pos()
-            detector_string += f"Detector({x}, {y}, {time}) "
-            for m in d.open + d.close:
+            detector_string += f"DETECTOR({x}, {y}, {time}) "
+            for m in d.open_meas + d.close_meas:
                 idx = find_measurement_index(m)
                 detector_string += f"rec[{idx}] "
             
             detector_string += "\n"
         
-        return detector_string
-                
+        return detector_string        
 
     def get_measurement(self, colour: str, flavour: str) -> str:
         """
@@ -516,8 +511,12 @@ class CSSHoneycomb:
                 
         self.__record_measurements(colour, flavour, target_edges, target_vertices) # NOTE not sure if I need colour here
         
-        detectors = self.get_detectors(self.clock)
+        detectors = self.get_detectors()
         string += self.write_detectors(detectors, self.clock)
+        
+        self.isg_tick()
+        
+        # print(detectors)
     
         return string
 
