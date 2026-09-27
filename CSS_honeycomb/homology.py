@@ -42,7 +42,7 @@ class nCell(ABC):
     def __eq__(self, other) -> bool:
         """two nCells are equal if they have the same key"""
         if not isinstance(other, type(self)) or other.n != self.n:
-            raise NotImplementedError
+            return NotImplemented
         return self.key == other.key
 
     def __hash__(self) -> int:
