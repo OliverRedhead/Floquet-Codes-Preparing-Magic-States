@@ -328,3 +328,23 @@ class BoundaryPlaquette(Plaquette):
                 return i
 
         return None
+    
+    def add_measurement(self, m: Measurement, isg_clock: int, end: str):
+        """
+        Add a measurement to this plaquette, attaching it to an existing
+        detector if one is awaiting this measurement, or starting a new
+        detector otherwise.
+
+        Parameters
+        ----------
+        m : Measurement
+            the measurement to add
+        isg_clock : int
+            The isg update counter for detectors.
+        end : str
+            'open' or 'close' - which end of a detector cell this measurement forms
+        """
+
+        if self.flavour != m.flavour:
+            return
+        super().add_measurement(m, isg_clock, end)
