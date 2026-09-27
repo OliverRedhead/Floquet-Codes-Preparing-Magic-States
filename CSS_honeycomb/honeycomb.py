@@ -273,11 +273,11 @@ class CSSHoneycomb:
         vertex = edge.vertices[r]
         ancilla = edge.ancilla
 
-        if flavour == "Z":
+        if flavour == "X":
             # ZZ: ancilla -> data
             return ancilla.key, vertex.key
 
-        elif flavour == "X":
+        elif flavour == "Z":
             # XX: data -> ancilla
             return vertex.key, ancilla.key
 
