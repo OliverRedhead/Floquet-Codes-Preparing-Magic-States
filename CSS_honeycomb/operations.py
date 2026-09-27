@@ -177,82 +177,61 @@ class Detector(Operation):
     
     Detectors make our life much more difficult.
     """
+    
+    # TODO currently have a time, open time and close time attribute. Can make this cleanere.
 
     def __init__(
         self, 
-        open_meas: list[Measurement] | None, 
-        close_meas: list[Measurement] | None, 
+        open_meas: list[Measurement], 
         colour: str, 
+        isg_open_time: int,
         *, 
+        close_meas: list[Measurement] | None = None,
         flavour: str | None = None,
         open_time: int | None = None, 
         close_time: int | None = None
     ) -> None:
-        """
-        Initialise a Detectors instance.
+        """Initialise detector instance. A detector is defined by the measurements at its open and close.
 
         Parameters
         ----------
-        open : list[Measurement] | None
-            list of measurements that create syndrome at start of detector cell            
-        close : list[Measurement] | None
-            list of measurements that create syndrome at end of detector cell
+        open_meas : list[Measurement]
+            A list contain at least one Measurement instance. This will define the detectors start time and flavour.
         colour : str
-            colour of detector cell
-        flavour : str | None = None
-            optional. flavour of detector cell, if not specified it is calculated.
-        open_time : int | None = None
-            optional. open time of detector cell, if not specified it is calculated.
-        close_time : int | None = None
-            optional. close time of detector cell, if not specified it is calculated.
+            'red', 'green' or 'blue'. The colour of plaquette that supports this detector.
+        isg_open_time : int
+            The is_time that this detector is opened. This is useful as detectors last for 
+            4 isg updates, so our isg_close_time is +4. Will need this for lookup later.
+        close_meas, optional : list[Measurement] | None
+            Measurements that make up the closure of this detector, we will usually just add these after initialisation, by default None.
+        flavour, optional : str | None
+            We can specify the flavour as long as it matches the flavour of our measurement, by default None.
+        open_time, optional : int
+            We can specify the open time, if not specified automatically calculated, by default None.
+        close_time, optional
+            We can specify the close time, if not specified automatically calculated, by default None
         """
+        if not open_meas:
+            raise ValueError("open_meas cannot be empty. Must specify at least one Measurement.")
         
-        open_meas = open_meas if open_meas is not None else []
-        close_meas = close_meas if close_meas is not None else []
-        
-        self.open = open_meas
-        self.close = close_meas
+        self.open_meas = open_meas
+        self.close_meas = close_meas if close_meas is not None else []
         self.colour = colour
+        self.isg_open_time = isg_open_time
+        self.isg_close_time = isg_open_time + 4
         
-        if open_time is not None:
-            close_time = open_time + 4
-        elif close_time is not None:
-            open_time = close_time - 4
-            
-            if open_time < 0:
-                raise NotImplementedError("You need to catch these detectors cells that open before our code starts!")
-            
-        else:
-            if not (open_meas or close_meas):
-                raise ValueError("Must specify at least one: open_meas, close_meas, open_time, close_time")
-            
-            open_time = open_meas[0].time if open_meas else close_meas[0].time - 4
-            close_time = close_meas[0].time if close_meas else open_meas[0].time + 4
-            
-            if close_time - open_time != 4:
-                raise NotImplementedError(f"Time on measurements does not work with our code.\
-                                          opened at {open_time} and closed at {close_time} is not allowed.")
+        self.open_time = open_meas[0].time if open_time is None else open_time
+        self.close_time = close_time # could be None
         
-        # set open and close time attribute
-        self.open_time = open_time
-        self.close_time = close_time
-
-        # set flavour attribute
-        if flavour is None:
-            # should have handled the case where both of these are empty already
-            if open_meas: 
-                self.flavour = open_meas[0].flavour
-            else:
-                self.flavour = close_meas[0].flavour
-        else:
-            self.flavour = flavour
+        self.flavour = open_meas[0].flavour if flavour is None else flavour
         
         # make sure all measurements have same flavour.
-        for m in open_meas + close_meas:
+        for m in self.open_meas + self.close_meas:
             if m.flavour != self.flavour:
                 raise NotImplementedError("Measurement cannot have different flavour to Detector.")
 
-        super().__init__(open_time)
+        # the self.time attribute is given as the isg_time
+        super().__init__(isg_open_time)
         
     def is_valid(self):
         """
@@ -263,27 +242,28 @@ class Detector(Operation):
         Also could just make this an attribute that gets updated everytime we add new measurement.
         """
         # 1. must have same number of open and close measurements.
-        if (len(self.open) != len(self.close)) or (len(self.open) == 0):
+        if (len(self.open_meas) != len(self.close_meas)) or (len(self.open_meas) == 0):
             return False
         
         # 2. Measurements all have the same flavour.
-        for m in self.open + self.close:
+        for m in self.open_meas + self.close_meas:
             if m.flavour != self.flavour:
                 raise NotImplementedError("Measurement cannot have different flavour to Detector.")
     
         # 3. Measurements in open and close must occur at same respective non-negative time-steps
-        for m in self.open:
+        for m in self.open_meas:
             if m.time != self.open_time:
                 raise NotImplementedError(f"Measurements in detector open must all be taken at the same time step.")
             if m.time < 0:
                 return False
             
-        for m in self.close:
+        for m in self.close_meas:
             if m.time != self.close_time:
                 raise NotImplementedError(f"Measurements in detector close must all be taken at the same time step.")
             if m.time < 0:
                 raise ValueError("Somehow we have set up a measurement that closes before time starts.")
         
+        return True
         
     def add_measurement(self, m: Measurement, end: str):
         """add a measurement to this detector
@@ -303,13 +283,16 @@ class Detector(Operation):
             if m.time != self.open_time:
                 raise NotImplementedError(f"Measurements in detector open must all be taken at the same time step.")
             
-            self.open.append(m)
+            self.open_meas.append(m)
             
         elif end == "close":
-            if m.time != self.close_time:
+            if self.close_time is None:
+                self.close_time = m.time
+            
+            elif m.time != self.close_time:
                 raise NotImplementedError(f"Measurements in detector close must all be taken at the same time step.")
             
-            self.close.append(m)
+            self.close_meas.append(m)
             
         else:
             raise NotImplementedError(f"end must be 'open' or 'close', not {end}")
@@ -318,5 +301,5 @@ class Detector(Operation):
     def get_pos(self):
         """Compute the detector position as the COM of its qubits."""
         # TODO make sure this works
-        return np.mean([m.target.pos for m in self.open], axis=0)
+        return np.mean([m.target.pos for m in self.open_meas], axis=0)
             
