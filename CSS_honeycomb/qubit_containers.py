@@ -230,7 +230,7 @@ class Plaquette(TwoCell):
         """
         return len(self.vertices)
     
-    def add_measurement(self, m: Measurement, end: str):
+    def add_measurement(self, m: Measurement, isg_clock: int, end: str):
         """
         Add a measurement to this plaquette, attaching it to an existing
         detector if one is awaiting this measurement, or starting a new
@@ -240,32 +240,41 @@ class Plaquette(TwoCell):
         ----------
         m : Measurement
             the measurement to add
+        isg_clock : int
+            The isg update counter for detectors.
         end : str
             'open' or 'close' - which end of a detector cell this measurement forms
         """
 
         for d in self.detectors:
-            if d.flavour != m.flavour:
+            if d.flavour != m.flavour: # must be same flavour.
                 continue
 
-            if end == "open" and d.open_time == m.time and not d.open:
+            elif end == "open" and d.isg_open_time == isg_clock:
                 d.add_measurement(m, end)
                 return
 
-            if end == "close" and d.close_time == m.time and not d.close:
+            elif end == "close" and d.isg_close_time == isg_clock:
                 d.add_measurement(m, end)
                 return
+            
+        # we cannot close a detector that was never opened
+        if end == "close":
+            return
 
-        # no existing detector matched - start a new one
-        open_meas = [m] if end == "open" else []
-        close_meas = [m] if end == "close" else []
-        d = Detector(open_meas, close_meas, self.colour)
+        # no existing detector matched - start a new one        
+        open_meas = [m]
+        d = Detector(open_meas, self.colour, isg_clock)
         self.detectors.append(d)
                 
     def detector_closes(self, time): # TODO check what this does
         """I genuinely dont remember writing this."""
         for d in self.detectors:
-            if d.close_time == time and d.is_valid():
+            
+            t = d.isg_close_time
+            v = d.is_valid()
+            
+            if d.isg_close_time == time and d.is_valid():
                 return d
                 
 
