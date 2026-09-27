@@ -63,3 +63,21 @@ I have a couple ideas on how to implement this.
    - Put another layer of plaquettes
 
 I actually think it makes the most sense to set up plaquettes and edges for these single-body stabilizers. This way they should be handled similar to the bulk (hopefully)
+# 27/9/26
+I have been slack updating this. Since the last update we have implemented the following:
+   - boundary conditions
+      The CSSHoneycomb class automatically sets up plaquettes on the boundary and uses some our our useful homology tools to decide which single-body measurements to make.
+      These BoundaryPlaquettes are important for our detectors and let us construct detectors on specific flavours and lower weight.
+   - measurement cycles
+      Our CSSHoneycomb class now writes our measurements into the string to pass to stim before initialising the list of Measurement objects and handing them to our plaquettes to add to their detectors. Then we add the measurements to the honeycomb's list of measurements for lookup later.
+   - detectors
+      We can set up our detectors. We define a detector by the measurements that open it and the measurements that close it. We had to define an isg update clock to keep trach of our detector cycles seperate from our circuit level clock. the surface will look through the detectors in the code and if they are closing at the relevant time it will write them into the string to pass to stim.
+
+I am not 100% sure this is working because I can't test the distance of the code before defining logicals, but logicals could be done by hand for a few distances to test this. I might do this later today if I can be bothered. But the detslice doesnt look totally wrong which is nice.
+
+So todo is
+   1. logicals
+   2. initialisation
+   3. testing
+   4. simulation
+   5. 488

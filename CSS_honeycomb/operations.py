@@ -177,9 +177,6 @@ class Detector(Operation):
     
     Detectors make our life much more difficult.
     """
-    
-    # TODO currently have a time, open time and close time attribute. Can make this cleanere.
-
     def __init__(
         self, 
         open_meas: list[Measurement], 
@@ -300,6 +297,5 @@ class Detector(Operation):
         
     def get_pos(self):
         """Compute the detector position as the COM of its qubits."""
-        # TODO make sure this works
         return np.mean([m.target.pos for m in self.open_meas], axis=0)
             
