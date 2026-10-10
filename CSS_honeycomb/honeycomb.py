@@ -215,7 +215,7 @@ class CSSHoneycomb:
         NOTE For now, the circuit only works in square coordinates.
         """
         
-        if coordinates != 'square':
+        if coordinates != 'square': # NOTE this doesnt work anymore.
             return self.__initialise_circuit_hex()
         
         string = "# data qubits\n"
@@ -225,12 +225,17 @@ class CSSHoneycomb:
         string += "# ancilla qubits\n"
         for e in self.edges:
             string += str(e.ancilla) + "\n"
+            
+        self.qubit_coords = {q.pos : q.key for q in self.vertices}
         
         return string
     
     def __initialise_circuit_hex(self):
         string = ""        
-        hex_coords = CSSHoneycomb.square_to_hex(self.coords)
+        
+        coords = [v.pos for v in self.vertices]
+        
+        hex_coords = CSSHoneycomb.square_to_hex(coords)
         for i, (x, y) in enumerate(hex_coords):
             string += f"QUBIT_COORDS({x}, {y}) {i}\n"
         return string
@@ -319,7 +324,34 @@ class CSSHoneycomb:
                 targets.append(v)
             
         return list(set(targets))
-
+    
+    """
+    This schedule will help us define our logicals.
+    """
+    LOGICAL_SCHEDULE = {
+        ('red', 'Z')    : {'X' : 'red',     'Z' : 'blue'},
+        ('green', 'X')  : {'X' : 'red',     'Z' : 'green'},
+        ('blue', 'Z')   : {'X' : 'blue',    'Z' : 'green'},
+        ('red', 'X')    : {'X' : 'blue',    'Z' : 'red'},
+        ('green', 'Z')  : {'X' : 'green',   'Z' : 'red'},
+        ('blue', 'X')   : {'X' : 'green',   'Z' : 'blue'},
+    }
+    
+    def get_logicals(self, colour : str, flavour: str):
+        """Get the X and Z logical operators of the code.
+        
+        Parameters
+        ----------
+        colour : str
+            'red', 'green' or 'blue'. Tells us what colour of edges are measured this round.
+        flavour : str
+            'X' or 'Z'. Tells us what flavour is measured this round
+        """
+        x_path_colour = CSSHoneycomb.LOGICAL_SCHEDULE[(colour, flavour)]['X']
+        z_path_colour = CSSHoneycomb.LOGICAL_SCHEDULE[(colour, flavour)]['Z']
+        
+        
+    
     """
     This dictionary holds the detector cell schedule. It is of the form
            dict[ tuple[str] : dict[ str : str ] ]
@@ -338,7 +370,6 @@ class CSSHoneycomb:
         ('green', 'Z')  : {'open' : 'red',   'close' : 'blue'},
         ('blue', 'X')   : {'open' : 'green', 'close' : 'red'},
     }
-
 
     def __record_measurements(self, colour, flavour, target_edges, target_vertices):
         """Record measurements for bulk and boundary plaquettes.
@@ -383,16 +414,12 @@ class CSSHoneycomb:
                         p.add_measurement(m, self.isg_clock, "open")
                     elif p.colour == close_colour:
                         p.add_measurement(m, self.isg_clock, "close")
-
                               
     def get_detectors(self):
         """Get a list of the valid detectors that close at the given time step."""
         detectors = []
         for p in self.plaquettes:
-            
-            # NOTE debugging
-            c = p.colour
-            
+                    
             d = p.detector_closes(self.isg_clock)
             if d is not None:
                 detectors.append(d)
@@ -515,8 +542,6 @@ class CSSHoneycomb:
         string += self.write_detectors(detectors, self.clock)
         
         self.isg_tick()
-        
-        # print(detectors)
     
         return string
 
@@ -524,9 +549,9 @@ class CSSHoneycomb:
 
     def prepare_qubits(self) -> str:
         """
-        This method should prepare our states states following our injection protocol
-
-        NOTE For now, we initialise everying in |0>
+        This method should prepare our states states following our injection protocol.
+        
+        Also need to initialise detectors that exist on initialisation.
         """
         qubit_keys = [v.key for v in self.vertices]
         
@@ -534,7 +559,6 @@ class CSSHoneycomb:
         for key in qubit_keys:
             string += str(key) + " "
         return string
-
 
 
     """
