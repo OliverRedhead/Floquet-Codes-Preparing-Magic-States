@@ -630,7 +630,7 @@ class CSSHoneycomb:
             Stim reset instructions, followed by the Bell pair circuit if a T
             qubit is configured, each layer ending in a TICK.
         """
-        RESET_FOR_STATE = {"Z": "R", "0": "R", "X": "RX", "Y": "RY", "T": "R"}
+        RESET_FOR_STATE = {"Z": "R", "X": "RX", "Y": "RY", "T": "R"}
 
         resets = {"R": [], "RX": [], "RY": []}
         t_key = None
@@ -659,13 +659,11 @@ class CSSHoneycomb:
         # Bell pair between the T ancilla and the T qubit
         if t_key is not None:
             string += "# Bell pair: T ancilla <-> T qubit\n"
-            string += f"H {CSSHoneycomb.T_ANCILLA_KEY}" + self.tick()
+            string += f"H {CSSHoneycomb.T_ANCILLA_KEY}\n"
             string += f"CNOT {CSSHoneycomb.T_ANCILLA_KEY} {t_key}" + self.tick()
 
         return string
-    
         
-            
 
     """
     helper methods
