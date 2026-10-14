@@ -123,7 +123,7 @@ class Measurement(Gate):
         super().__init__(target, time)
 
     def __eq__(self, other):
-        """Need __eq__ to capture equality of measurement flavour too"""
+        """Need __eq__ to capture equality of measurement flavour too"""        
         return super().__eq__(other) and (self.flavour == other.flavour)
     
     def __hash__(self) -> int:
@@ -132,6 +132,33 @@ class Measurement(Gate):
         we should explicitly redefine hash following our definition of equality.
         """
         return hash((type(self).__name__, self.target.key, self.time, self.flavour))
+ 
+ 
+class PauliString(Gate):
+    """A multi-qubit Pauli product measurement (MPP)."""
+
+    OPERATION = "MPP"
+
+    def __init__(self, targets: list[Qubit], time: int, flavour: str) -> None:
+        self.targets = targets
+        self.time = time
+        self.flavour = flavour
+
+    def __eq__(self, other) -> bool:
+        return (
+            isinstance(other, PauliString)
+            and self.time == other.time
+            and self.flavour == other.flavour
+            and self.targets == other.targets
+        )
+
+    def __hash__(self) -> int:
+        return hash((type(self).__name__, tuple(q.key for q in self.targets), self.time, self.flavour))
+
+    def __repr__(self) -> str:
+        return f"{self.OPERATION}(flavour={self.flavour}, targets={[q.key for q in self.targets]}, time={self.time})"
+        
+ 
         
 class Cnot(Gate):
     
@@ -179,11 +206,11 @@ class Detector(Operation):
     """
     def __init__(
         self, 
-        open_meas: list[Measurement], 
+        open_meas: list[Measurement | PauliString], 
         colour: str, 
         isg_open_time: int,
         *, 
-        close_meas: list[Measurement] | None = None,
+        close_meas: list[Measurement | PauliString] | None = None,
         flavour: str | None = None,
         open_time: int | None = None, 
         close_time: int | None = None
@@ -262,7 +289,7 @@ class Detector(Operation):
         
         return True
         
-    def add_measurement(self, m: Measurement, end: str):
+    def add_measurement(self, m: Measurement | PauliString, end: str):
         """add a measurement to this detector
 
         Parameters
@@ -298,4 +325,7 @@ class Detector(Operation):
     def get_pos(self):
         """Compute the detector position as the COM of its qubits."""
         return np.mean([m.target.pos for m in self.open_meas], axis=0)
+    
+    def is_closed(self) -> bool:
+        return self.close_time is not None
             

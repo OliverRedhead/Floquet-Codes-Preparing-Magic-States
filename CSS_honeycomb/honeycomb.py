@@ -1,7 +1,9 @@
 import numpy as np
 import matplotlib.pyplot as plt
+import json
+
 from qubit_containers import Vertex, Edge, Plaquette, BoundaryPlaquette
-from operations import Measurement
+from operations import Measurement, PauliString
 
 class CSSHoneycomb:
     """
@@ -13,7 +15,7 @@ class CSSHoneycomb:
     initialisation methods
     """
 
-    def __init__(self, ncols : int = 5, nrows : int = 4) -> None:
+    def __init__(self, ncols : int = 5, nrows : int = 4, *, config=False) -> None:
         """
         Initialise CSSHoneycomb instance. Automatically generates vertices (and qubits) based on input nrows and ncols.
         NOTE that not all boundary conditions are accounted for. 
@@ -46,6 +48,13 @@ class CSSHoneycomb:
         
         # This counts ISG updates
         self.isg_clock = 0
+        
+        # set config
+        if config:
+            raw = json.load(open(f"preparation/{self.ncols}x{self.nrows}.json"))
+            initialisation = { self.qubit_coords[tuple(q["pos"])] : q["init"] for q in raw["qubits"] }
+        
+    
     
     def __initialise_vertices(self) -> list[Vertex]:
         """Initialise vertices, note that data qubits are initialised in this step too"""
@@ -325,18 +334,6 @@ class CSSHoneycomb:
             
         return list(set(targets))
     
-    """
-    This schedule will help us define our logicals.
-    """
-    LOGICAL_SCHEDULE = {
-        ('red', 'Z')    : {'X' : 'red',     'Z' : 'blue'},
-        ('green', 'X')  : {'X' : 'red',     'Z' : 'green'},
-        ('blue', 'Z')   : {'X' : 'blue',    'Z' : 'green'},
-        ('red', 'X')    : {'X' : 'blue',    'Z' : 'red'},
-        ('green', 'Z')  : {'X' : 'green',   'Z' : 'red'},
-        ('blue', 'X')   : {'X' : 'green',   'Z' : 'blue'},
-    }
-    
     def get_logicals(self, colour : str, flavour: str):
         """Get the X and Z logical operators of the code.
         
@@ -347,8 +344,7 @@ class CSSHoneycomb:
         flavour : str
             'X' or 'Z'. Tells us what flavour is measured this round
         """
-        x_path_colour = CSSHoneycomb.LOGICAL_SCHEDULE[(colour, flavour)]['X']
-        z_path_colour = CSSHoneycomb.LOGICAL_SCHEDULE[(colour, flavour)]['Z']
+        return
         
         
     
@@ -371,7 +367,7 @@ class CSSHoneycomb:
         ('blue', 'X')   : {'open' : 'green', 'close' : 'red'},
     }
 
-    def __record_measurements(self, colour, flavour, target_edges, target_vertices):
+    def __record_measurements(self, colour, flavour, target_edges, target_vertices, *, logicals = None):
         """Record measurements for bulk and boundary plaquettes.
 
         Parameters
@@ -414,7 +410,7 @@ class CSSHoneycomb:
                         p.add_measurement(m, self.isg_clock, "open")
                     elif p.colour == close_colour:
                         p.add_measurement(m, self.isg_clock, "close")
-                              
+                                     
     def get_detectors(self):
         """Get a list of the valid detectors that close at the given time step."""
         detectors = []
@@ -545,7 +541,68 @@ class CSSHoneycomb:
     
         return string
 
-    # state preparation TODO
+    def final_readout(self) -> str:
+        """
+        Perform a final, noiseless readout of every stabilizer still in the ISG.
+
+        Finds every detector that has been opened but not yet closed, measures
+        the corresponding plaquette stabilizer directly with a single MPP
+        instruction, and closes the detector with that measurement. The DETECTOR
+        lines for all of these detectors are then written, so that each one
+        compares its opening edge measurements against the final readout.
+
+        This should be called once, after the last round of `get_measurement`.
+        Because a closed detector is skipped by `get_open_detectors`, a second
+        call returns an empty string rather than re-measuring anything.
+
+        No error model should be applied to this round.
+
+        Returns
+        -------
+        circuit string : str
+            A string in `stim` syntax: a TICK, a comment header, one
+            `MPP` line per open detector (e.g. `MPP X3*X4*X9`), then the
+            DETECTOR lines closing them. Returns an empty string if there are
+            no open detectors.
+
+        Notes
+        -----
+        - Each `PauliString` is appended to `self.measurements` before
+        `write_detectors` is called, since the `rec[-k]` offsets are looked up
+        from that list. The order of `MPP` lines must therefore match the order
+        of appends, which it does because both happen in the same loop.
+        - The detector is closed directly with `Detector.add_measurement`, not via
+        `Plaquette.add_measurement`, so that the readout is attached to the
+        specific open detector and not to an older, already-closed one of the
+        same flavour on that plaquette.
+        - Advances `self.clock` (via `tick`) and `self.isg_clock` (via
+        `isg_tick`), like `get_measurement`.
+        """
+        open_pairs = [
+            (p, d)
+            for p in self.plaquettes
+            for d in p.get_open_detectors()
+        ]
+
+        if not open_pairs:
+            return ""
+
+        string = self.tick()
+        string += "# final readout: measure out remaining ISG stabilizers\n"
+
+        for p, d in open_pairs:
+            qubits = [v.qubit for v in p.vertices]   # same iteration as get_MPPstring
+
+            m = PauliString(qubits, self.clock, d.flavour)
+            self.measurements.append(m)
+            d.add_measurement(m, "close")            # close this exact detector
+
+            string += p.get_MPPstring(d.flavour) + "\n"
+
+        string += self.write_detectors([d for _, d in open_pairs], self.clock)
+        self.isg_tick()
+
+        return string
 
     def prepare_qubits(self) -> str:
         """
@@ -909,3 +966,4 @@ class CSSHoneycomb:
         arc = (1 - t) ** 2 * p0 + 2 * (1 - t) * t * control + t ** 2 * p1
 
         return arc
+    

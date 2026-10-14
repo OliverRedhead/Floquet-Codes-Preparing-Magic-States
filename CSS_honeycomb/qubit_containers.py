@@ -7,7 +7,7 @@ import numpy as np
 from homology import ZeroCell, OneCell, TwoCell, ZeroChain, OneChain, TwoChain
 from qubit import Qubit, Ancilla
 from collections.abc import Sequence
-from operations import Measurement, Detector
+from operations import Measurement, Detector, PauliString
 
 """
 nCell subclasses to hold coordinates and colour information as well as inherit all the 
@@ -230,7 +230,7 @@ class Plaquette(TwoCell):
         """
         return len(self.vertices)
     
-    def add_measurement(self, m: Measurement, isg_clock: int, end: str):
+    def add_measurement(self, m: Measurement | PauliString, isg_clock: int, end: str):
         """
         Add a measurement to this plaquette, attaching it to an existing
         detector if one is awaiting this measurement, or starting a new
@@ -238,7 +238,7 @@ class Plaquette(TwoCell):
 
         Parameters
         ----------
-        m : Measurement
+        m : Measurement | PauliString
             the measurement to add
         isg_clock : int
             The isg update counter for detectors.
@@ -247,9 +247,10 @@ class Plaquette(TwoCell):
         """
 
         for d in self.detectors:
+            
             if d.flavour != m.flavour: # must be same flavour.
                 continue
-
+            
             elif end == "open" and d.isg_open_time == isg_clock:
                 d.add_measurement(m, end)
                 return
@@ -271,13 +272,27 @@ class Plaquette(TwoCell):
         """I genuinely dont remember writing this."""
         for d in self.detectors:
             
-            t = d.isg_close_time
-            v = d.is_valid()
-            
             if d.isg_close_time == time and d.is_valid():
                 return d
+            
+    def get_open_detectors(self):
+        """check if any detectors are still open. Used for final readout"""
+        output = [d for d in self.detectors if not d.is_closed()]                
+        return output
                 
-
+    def get_MPPstring(self, flavour):
+        """
+        stim interaction method. 
+        Generate an MPP (measure Pauli Product) string of this plaquette
+        For final readout
+        """
+        string = "MPP "
+        for v in self.vertices:
+            string += f"{flavour}{v.key}*"
+        
+        return string[:-1] # get rid of trailing '*'
+                
+                
 class BoundaryPlaquette(Plaquette):
     """
     A special type of plaquette that can contain less than 6 vertices and edges.
@@ -329,7 +344,7 @@ class BoundaryPlaquette(Plaquette):
 
         return None
     
-    def add_measurement(self, m: Measurement, isg_clock: int, end: str):
+    def add_measurement(self, m: Measurement | PauliString, isg_clock: int, end: str):
         """
         Add a measurement to this plaquette, attaching it to an existing
         detector if one is awaiting this measurement, or starting a new
