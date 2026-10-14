@@ -64,6 +64,15 @@ class CSSHoneycomb:
             with open(config_filepath) as f:
                 raw = json.load(f)
             self.preparation = { self.qubit_coords[tuple(q["pos"])] : q["init"] for q in raw["qubits"] }
+    
+            # {"rXX": {"X": [keys], "Z": [keys]}, ...}
+            self.logical_schedule = {
+                name: {
+                    P: [self.qubit_coords[tuple(pos)] for pos in ops[f"{P}_logical"]]
+                    for P in ("X", "Z")
+                }
+                for name, ops in raw["logical_schedule"].items()
+            }
         
     
     
@@ -341,8 +350,8 @@ class CSSHoneycomb:
             
         return list(set(targets))
     
-    def get_logicals(self, colour : str, flavour: str):
-        """Get the X and Z logical operators of the code.
+    def _get_logical_keys(self, colour : str, flavour: str) -> tuple[list, list]:
+        """Get the qubits which support the X and Z logical operators of the code.
         
         Parameters
         ----------
@@ -350,8 +359,65 @@ class CSSHoneycomb:
             'red', 'green' or 'blue'. Tells us what colour of edges are measured this round.
         flavour : str
             'X' or 'Z'. Tells us what flavour is measured this round
+        
+        Returns
+        -------
+        x_logical : tuple[list[Vertex]]
+            I will give you two guesses what this is
+        z_logical : tuple[list[Vertex]]
+            Just fucking think about it.
         """
-        return
+        
+        if self.logical_schedule is None:
+            raise ValueError("No logical_schedule loaded; pass config_filepath.")
+        name = f"{colour[0]}{flavour}{flavour}"      # e.g. 'red','X' -> 'rXX'
+        entry = self.logical_schedule[name]
+        return entry["X"], entry["Z"]
+        
+    def write_logicals(self, colour: str, flavour: str) -> str:
+        """
+        Measure out the Z and X logical operators as Pauli products and
+        attach each to a stim observable.
+
+        Each logical is a single MPP product and so produces exactly one
+        measurement record. The Z logical is measured first, so with two
+        records written:
+            rec[-2] -> Z logical -> OBSERVABLE_INCLUDE(0)
+            rec[-1] -> X logical -> OBSERVABLE_INCLUDE(1)
+
+        Parameters
+        ----------
+        colour : str
+            'red', 'green' or 'blue'. Colour of edges measured this round.
+        flavour : str
+            'X' or 'Z'. Flavour measured this round.
+
+        Returns
+        -------
+        str
+            Stim MPP line followed by the OBSERVABLE_INCLUDE lines.
+        """
+        x_logical, z_logical = self._get_logical_keys(colour, flavour)
+
+        key_to_qubit = {v.key: v.qubit for v in self.vertices}
+
+        z_product = "*".join(f"Z{k}" for k in z_logical)
+        x_product = "*".join(f"X{k}" for k in x_logical)
+
+        # record these so later write_detectors rec[] offsets stay correct
+        self.measurements.append(
+            PauliString([key_to_qubit[k] for k in z_logical], self.clock, "Z")
+        )
+        self.measurements.append(
+            PauliString([key_to_qubit[k] for k in x_logical], self.clock, "X")
+        )
+
+        return (
+            "# measure out logicals as products of Paulis\n"
+            f"MPP {z_product} {x_product}\n"
+            "OBSERVABLE_INCLUDE(0) rec[-2]\n"
+            "OBSERVABLE_INCLUDE(1) rec[-1]\n"
+        )
         
         
     
@@ -522,8 +588,8 @@ class CSSHoneycomb:
         # If measuring X stabilizer, put ancillas back in Z basis
         if flavour == "X":
             string += "# rotate ancillas back to Z basis\nH "
-            for a in ancilla_keys:
-                string += str(a) + " "
+            for k in ancilla_keys + vertex_keys:
+                string += str(k) + " "
             string += self.tick()
 
         # measure ancillas
@@ -531,13 +597,18 @@ class CSSHoneycomb:
         for a in ancilla_keys:
             string += str(a) + " "
         
-        # measure boundary    
-        # NOTE Im not sure how to do this without using MX gates.
-        # Other than just making qubits idle for a while.
+        # measure boundary data qubits (always in the Z basis)
         if vertex_keys:
-            string += f"\n#{colour}{flavour} boundary\nM{flavour} "
+            string += f"\n#{colour}{flavour} boundary\nM "
             for v in vertex_keys:
                 string += str(v) + " "
+
+            # undo the basis change so the qubits are back in the X basis
+            if flavour == "X":
+                string += "\n# restore boundary qubits to X basis\nH "
+                for v in vertex_keys:
+                    string += str(v) + " "
+            
                 
         self.__record_measurements(colour, flavour, target_edges, target_vertices) # NOTE not sure if I need colour here
         
@@ -610,7 +681,6 @@ class CSSHoneycomb:
         self.isg_tick()
 
         return string
-
 
     def prepare_qubits(self) -> str:
         """
