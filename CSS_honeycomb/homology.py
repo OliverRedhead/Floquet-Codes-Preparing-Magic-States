@@ -7,6 +7,8 @@ I plan to use boundary and coboundary maps to move between homologies, and if we
 superlattice of the triangular toric code easier.
 """
 
+from __future__ import annotations
+
 from abc import ABC, abstractmethod
 from collections.abc import Sequence
 from typing import Iterator

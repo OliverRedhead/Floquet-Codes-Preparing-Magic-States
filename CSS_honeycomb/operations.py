@@ -208,19 +208,23 @@ class Detector(Operation):
         close_time, optional
             We can specify the close time, if not specified automatically calculated, by default None
         """
-        if not open_meas:
+        close = close_meas if close_meas is not None else []
+        if not open_meas and not close:
             raise ValueError("open_meas cannot be empty. Must specify at least one Measurement.")
         
-        self.open_meas = open_meas
-        self.close_meas = close_meas if close_meas is not None else []
+        self.open_meas = list(open_meas)
+        self.close_meas = list(close)
         self.colour = colour
         self.isg_open_time = isg_open_time
         self.isg_close_time = isg_open_time + 4
         
-        self.open_time = open_meas[0].time if open_time is None else open_time
+        anchor = self.open_meas[0] if self.open_meas else self.close_meas[0]
+        self.open_time = anchor.time if open_time is None else open_time
         self.close_time = close_time # could be None
+        if self.close_time is None and self.close_meas and not self.open_meas:
+            self.close_time = self.close_meas[0].time
         
-        self.flavour = open_meas[0].flavour if flavour is None else flavour
+        self.flavour = anchor.flavour if flavour is None else flavour
         
         # make sure all measurements have same flavour.
         for m in self.open_meas + self.close_meas:
@@ -297,5 +301,6 @@ class Detector(Operation):
         
     def get_pos(self):
         """Compute the detector position as the COM of its qubits."""
-        return np.mean([m.target.pos for m in self.open_meas], axis=0)
+        records = self.open_meas if self.open_meas else self.close_meas
+        return np.mean([m.target.pos for m in records], axis=0)
             
