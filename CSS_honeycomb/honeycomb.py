@@ -14,11 +14,12 @@ class CSSHoneycomb:
     """
     initialisation methods
     """
+    
+    T_ANCILLA_KEY = 0
 
-    def __init__(self, ncols : int = 5, nrows : int = 4, *, config=False) -> None:
+    def __init__(self, ncols : int = 5, nrows : int = 4, *, config_filepath: str | None = None) -> None:
         """
         Initialise CSSHoneycomb instance. Automatically generates vertices (and qubits) based on input nrows and ncols.
-        NOTE that not all boundary conditions are accounted for. 
 
         Parameters
         ----------
@@ -26,6 +27,8 @@ class CSSHoneycomb:
             number of rows of qubits
         ncols : int = 5
             number of columns of qubits
+        config_filepath: str | None
+            filepath to config, default None.
 
         Notes
         -----
@@ -41,6 +44,11 @@ class CSSHoneycomb:
         self.edges = self.__initialise_edges()
         self.plaquettes = self.__initialise_plaquettes()
         self.plaquettes += self.__initialise_boundary_plaquettes()
+        
+        self.qubit_coords = {q.pos : q.key for q in self.vertices}
+        
+        self.vertices.append(Vertex(0, (self.ncols//2, -1))) # ancilla for T state
+        
         self.measurements = []
         
         # This counts our circuit level ticks
@@ -50,28 +58,29 @@ class CSSHoneycomb:
         self.isg_clock = 0
         
         # set config
-        if config:
-            raw = json.load(open(f"preparation/{self.ncols}x{self.nrows}.json"))
-            initialisation = { self.qubit_coords[tuple(q["pos"])] : q["init"] for q in raw["qubits"] }
+        self.preparation = None
+        
+        if config_filepath is not None:
+            with open(config_filepath) as f:
+                raw = json.load(f)
+            self.preparation = { self.qubit_coords[tuple(q["pos"])] : q["init"] for q in raw["qubits"] }
         
     
     
     def __initialise_vertices(self) -> list[Vertex]:
         """Initialise vertices, note that data qubits are initialised in this step too"""
 
-        vertices = []
-        key = 0
+        vertices = [] 
+        key = 1 # we will put our ancilla at key=0
 
-        for y in range(self.nrows):
+        for y in range(self.nrows):    
             n_vertices = self.ncols if y in (0, self.nrows - 1) else self.ncols + 1
 
             for x in range(n_vertices):
+                
                 x_pos = x + y - 1 if y > 0 else x
 
-                vertices.append(
-                    Vertex(key, (x_pos, y))
-                )
-
+                vertices.append(Vertex(key, (x_pos, y)))
                 key += 1
 
         return vertices
@@ -89,7 +98,7 @@ class CSSHoneycomb:
         def make_edge(v0: Vertex, v1: Vertex, direction: str) -> Edge:
             edge_key = len(edges)
             colour = CSSHoneycomb.__colour_edge(v0.pos[0], direction)
-            ancilla_key = len(self.vertices) + edge_key
+            ancilla_key = len(self.vertices) + edge_key + 1 # +1 is because I add the ancilla for logicals later.
 
             return Edge(
                 edge_key,
@@ -234,8 +243,6 @@ class CSSHoneycomb:
         string += "# ancilla qubits\n"
         for e in self.edges:
             string += str(e.ancilla) + "\n"
-            
-        self.qubit_coords = {q.pos : q.key for q in self.vertices}
         
         return string
     
@@ -367,7 +374,7 @@ class CSSHoneycomb:
         ('blue', 'X')   : {'open' : 'green', 'close' : 'red'},
     }
 
-    def __record_measurements(self, colour, flavour, target_edges, target_vertices, *, logicals = None):
+    def __record_measurements(self, colour, flavour, target_edges, target_vertices):
         """Record measurements for bulk and boundary plaquettes.
 
         Parameters
@@ -604,19 +611,61 @@ class CSSHoneycomb:
 
         return string
 
+
     def prepare_qubits(self) -> str:
         """
-        This method should prepare our states states following our injection protocol.
-        
-        Also need to initialise detectors that exist on initialisation.
-        """
-        qubit_keys = [v.key for v in self.vertices]
-        
-        string = "# initialise qubits in |0>\nR "
-        for key in qubit_keys:
-            string += str(key) + " "
-        return string
+        Prepare all qubits for the start of the circuit.
 
+        Every qubit is reset in the Z basis by default. If a preparation config
+        was loaded, qubits listed there are reset in the requested basis instead:
+        'X' -> |+>, 'Y' -> |+i>, 'Z' (or '0') -> |0>.
+
+        The qubit marked 'T' is reset to |0> and then entangled with the T
+        ancilla (key 0) in a Bell pair: H on the ancilla, then CNOT
+        ancilla -> T qubit. This gives (|00> + |11>)/sqrt(2).
+
+        Returns
+        -------
+        circuit string : str
+            Stim reset instructions, followed by the Bell pair circuit if a T
+            qubit is configured, each layer ending in a TICK.
+        """
+        RESET_FOR_STATE = {"Z": "R", "0": "R", "X": "RX", "Y": "RY", "T": "R"}
+
+        resets = {"R": [], "RX": [], "RY": []}
+        t_key = None
+
+        if self.preparation is None:
+            resets["R"] = [v.key for v in self.vertices]
+        else:
+
+            t_keys = [k for k, s in self.preparation.items() if s == "T"]
+            if len(t_keys) != 1:
+                raise ValueError(f"Expected exactly one T qubit, found {len(t_keys)}")
+            t_key = t_keys[0]
+
+            for v in self.vertices:
+                state = self.preparation.get(v.key, "Z")
+                if state not in RESET_FOR_STATE:
+                    raise ValueError(f"Unknown preparation state {state!r} on qubit {v.key}")
+                resets[RESET_FOR_STATE[state]].append(v.key)
+
+        string = "# initialise qubits\n"
+        for instruction, keys in resets.items():
+            if keys:
+                string += f"{instruction} " + " ".join(map(str, keys)) + "\n"
+        string += self.tick()
+
+        # Bell pair between the T ancilla and the T qubit
+        if t_key is not None:
+            string += "# Bell pair: T ancilla <-> T qubit\n"
+            string += f"H {CSSHoneycomb.T_ANCILLA_KEY}" + self.tick()
+            string += f"CNOT {CSSHoneycomb.T_ANCILLA_KEY} {t_key}" + self.tick()
+
+        return string
+    
+        
+            
 
     """
     helper methods
