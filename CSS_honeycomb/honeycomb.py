@@ -1,9 +1,12 @@
-import numpy as np
-import matplotlib.pyplot as plt
 import json
+
+import matplotlib.pyplot as plt
+import numpy as np
+import stim
 
 from qubit_containers import Vertex, Edge, Plaquette, BoundaryPlaquette
 from operations import Measurement, PauliString
+
 
 class CSSHoneycomb:
     """
@@ -59,17 +62,19 @@ class CSSHoneycomb:
         
         # set config
         self.preparation = None
-        
+        self.logical_schedule = None   # {"rXX": {"X": [keys], "Z": [keys]}, ...}
+
         if config_filepath is not None:
             with open(config_filepath) as f:
                 raw = json.load(f)
-            self.preparation = { self.qubit_coords[tuple(q["pos"])] : q["init"] for q in raw["qubits"] }
-    
-            # {"rXX": {"X": [keys], "Z": [keys]}, ...}
+
+            self.preparation = {
+                self.qubit_coords[tuple(q["pos"])]: q["init"] for q in raw["qubits"]
+            }
             self.logical_schedule = {
                 name: {
-                    P: [self.qubit_coords[tuple(pos)] for pos in ops[f"{P}_logical"]]
-                    for P in ("X", "Z")
+                    basis: [self.qubit_coords[tuple(pos)] for pos in ops[f"{basis}_logical"]]
+                    for basis in ("X", "Z")
                 }
                 for name, ops in raw["logical_schedule"].items()
             }
@@ -350,40 +355,12 @@ class CSSHoneycomb:
             
         return list(set(targets))
     
-    def _get_logical_keys(self, colour : str, flavour: str) -> tuple[list, list]:
-        """Get the qubits which support the X and Z logical operators of the code.
-        
-        Parameters
-        ----------
-        colour : str
-            'red', 'green' or 'blue'. Tells us what colour of edges are measured this round.
-        flavour : str
-            'X' or 'Z'. Tells us what flavour is measured this round
-        
-        Returns
-        -------
-        x_logical : tuple[list[Vertex]]
-            I will give you two guesses what this is
-        z_logical : tuple[list[Vertex]]
-            Just fucking think about it.
+    def _get_logical_keys(self, colour: str, flavour: str) -> dict[str, list[int]]:
         """
-        
-        if self.logical_schedule is None:
-            raise ValueError("No logical_schedule loaded; pass config_filepath.")
-        name = f"{colour[0]}{flavour}{flavour}"      # e.g. 'red','X' -> 'rXX'
-        entry = self.logical_schedule[name]
-        return entry["X"], entry["Z"]
-        
-    def write_logicals(self, colour: str, flavour: str) -> str:
-        """
-        Measure out the Z and X logical operators as Pauli products and
-        attach each to a stim observable.
+        Look up the data-qubit keys supporting each logical operator.
 
-        Each logical is a single MPP product and so produces exactly one
-        measurement record. The Z logical is measured first, so with two
-        records written:
-            rec[-2] -> Z logical -> OBSERVABLE_INCLUDE(0)
-            rec[-1] -> X logical -> OBSERVABLE_INCLUDE(1)
+        The logical representative changes as the ISG evolves, so it is keyed by
+        the round that has just been measured.
 
         Parameters
         ----------
@@ -394,32 +371,134 @@ class CSSHoneycomb:
 
         Returns
         -------
-        str
-            Stim MPP line followed by the OBSERVABLE_INCLUDE lines.
+        dict[str, list[int]]
+            {"X": [...], "Z": [...]}: qubit keys of the X and Z logicals.
+            The T ancilla is not included; see `_logical_pauli`.
         """
-        x_logical, z_logical = self._get_logical_keys(colour, flavour)
+        if self.logical_schedule is None:
+            raise ValueError("No logical_schedule loaded; pass config_filepath.")
 
-        key_to_qubit = {v.key: v.qubit for v in self.vertices}
+        name = f"{colour[0]}{flavour}{flavour}"   # e.g. ('red', 'X') -> 'rXX'
+        try:
+            return self.logical_schedule[name]
+        except KeyError:
+            raise ValueError(f"No logical entry for round {name!r} in the schedule.") from None
 
-        z_product = "*".join(f"Z{k}" for k in z_logical)
-        x_product = "*".join(f"X{k}" for k in x_logical)
+    def _logical_pauli(self, colour: str, flavour: str, basis: str) -> dict[int, str]:
+        """
+        Build the Pauli support {qubit_key: 'X' | 'Z'} of a logical.
 
-        # record these so later write_detectors rec[] offsets stay correct
-        self.measurements.append(
-            PauliString([key_to_qubit[k] for k in z_logical], self.clock, "Z")
+        The T ancilla is included because the logical is entangled with it
+        through the Bell pair, so only the product with the ancilla's Pauli is
+        fixed by the initial state.
+        """
+        if basis not in ("X", "Z"):
+            raise ValueError(f"basis must be 'X' or 'Z', not {basis!r}")
+
+        keys = self._get_logical_keys(colour, flavour)[basis]
+        return {k: basis for k in (CSSHoneycomb.T_ANCILLA_KEY, *keys)}
+
+    def _write_observable(self, circuit_so_far: str, index: int, pauli_by_key: dict[int, str]) -> str:
+        """
+        Emit an OBSERVABLE_INCLUDE for a Pauli operator, adding the measurement
+        records that make its value deterministic in a dynamic code.
+
+        In a dynamic code the logical representative changes between rounds, so
+        the Pauli operator alone is not a deterministic observable: its value
+        also depends on the outcomes of the checks multiplied in along the way.
+        Stim's flow solver finds the measurement records whose parity must be
+        included with the Pauli for the observable to be deterministic.
+
+        Parameters
+        ----------
+        circuit_so_far : str
+            Noiseless stim circuit text up to the point where the operator is
+            evaluated. Record offsets are relative to the end of this circuit,
+            so the returned line must be appended directly after it, before any
+            further measurements are added.
+        index : int
+            Observable index, as in OBSERVABLE_INCLUDE(index).
+        pauli_by_key : dict[int, str]
+            Support of the operator as {qubit_key: 'X' | 'Z'}, e.g.
+            {0: "Z", 2: "Z", 7: "Z"}.
+
+        Returns
+        -------
+        str
+            A single line of the form
+            `OBSERVABLE_INCLUDE(index) Z0 Z2 Z7 rec[-5] rec[-12]\n`.
+
+        Raises
+        ------
+        ValueError
+            If no combination of measurements makes the operator a valid flow,
+            meaning it is not a logical of the state at this point. This usually
+            indicates a wrong `logical_schedule` entry for the last measured
+            round, or a circuit that was not built up to that round.
+
+        Notes
+        -----
+        - Pauli targets in OBSERVABLE_INCLUDE read the operator non-destructively,
+        so nothing is measured and `self.measurements` is unaffected.
+        - Run this on the noiseless circuit. The records found remain valid once
+        noise instructions are inserted.
+        - Requires stim >= 1.15 for `Circuit.solve_flow_measurements`.
+        """
+        circuit = stim.Circuit(circuit_so_far)
+
+        logical = stim.PauliString(circuit.num_qubits)
+        for k, p in pauli_by_key.items():
+            logical[k] = p
+
+        # Ask stim which measurements make "nothing -> logical" a valid flow.
+        (recs,) = circuit.solve_flow_measurements([stim.Flow(output=logical)])
+        if recs is None:
+            raise ValueError(
+                "Pauli string is not a logical of the state at this point. "
+                "Check the logical_schedule entry for the last measured round."
+            )
+
+        n = circuit.num_measurements
+        recs = [r - n if r >= 0 else r for r in recs]   # absolute -> rec[-k] offsets
+
+        paulis = " ".join(f"{p}{k}" for k, p in pauli_by_key.items())
+        rec_str = " ".join(f"rec[{r}]" for r in recs)
+        return f"OBSERVABLE_INCLUDE({index}) {paulis} {rec_str}\n"
+
+    def write_logical_observable(self, circuit_so_far: str, colour: str, flavour: str,
+                                bases: tuple[str, ...] = ("Z", "X")) -> str:
+        """
+        Emit one OBSERVABLE_INCLUDE per requested logical basis, for the logical
+        representatives valid after round (colour, flavour).
+
+        Both logicals can be tracked in the same run because each is paired with
+        the T ancilla's Bell partner Pauli (X_L X_anc and Z_L Z_anc commute).
+
+        Parameters
+        ----------
+        circuit_so_far : str
+            Noiseless stim circuit text up to and including the round. Must end
+            right after that round's `get_measurement` output.
+        colour, flavour : str
+            The round that was just measured; selects the logical representatives.
+        bases : tuple[str, ...] = ("Z", "X")
+            Which logicals to emit. Observable index follows the order given,
+            so the default gives Z -> OBSERVABLE 0 and X -> OBSERVABLE 1.
+
+        Returns
+        -------
+        str
+            One OBSERVABLE_INCLUDE line per basis.
+
+        Notes
+        -----
+        All lines are computed against the same `circuit_so_far`. OBSERVABLE_INCLUDE
+        adds no measurement records, so the rec[] offsets are the same for each.
+        """
+        return "".join(
+            self._write_observable(circuit_so_far, i, self._logical_pauli(colour, flavour, b))
+            for i, b in enumerate(bases)
         )
-        self.measurements.append(
-            PauliString([key_to_qubit[k] for k in x_logical], self.clock, "X")
-        )
-
-        return (
-            "# measure out logicals as products of Paulis\n"
-            f"MPP {z_product} {x_product}\n"
-            "OBSERVABLE_INCLUDE(0) rec[-2]\n"
-            "OBSERVABLE_INCLUDE(1) rec[-1]\n"
-        )
-        
-        
     
     """
     This dictionary holds the detector cell schedule. It is of the form
