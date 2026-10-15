@@ -2,6 +2,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from qubit_containers import Vertex, Edge, Plaquette, BoundaryPlaquette
 from operations import Measurement
+from errors import ErrorModel
 
 class CSSHoneycomb:
     """
@@ -13,7 +14,7 @@ class CSSHoneycomb:
     initialisation methods
     """
 
-    def __init__(self, ncols : int = 5, nrows : int = 4) -> None:
+    def __init__(self, ncols : int = 5, nrows : int = 4, error_model: str | None = None) -> None:
         """
         Initialise CSSHoneycomb instance. Automatically generates vertices (and qubits) based on input nrows and ncols.
         NOTE that not all boundary conditions are accounted for. 
@@ -24,6 +25,8 @@ class CSSHoneycomb:
             number of rows of qubits
         ncols : int = 5
             number of columns of qubits
+        error_model : str | None = None
+            Path to an error-model JSON file. Defaults to error_model.json beside errors.py.
 
         Notes
         -----
@@ -34,6 +37,7 @@ class CSSHoneycomb:
 
         self.nrows = nrows
         self.ncols = ncols
+        self.error_model = ErrorModel.load(error_model)
 
         self.vertices = self.__initialise_vertices()
         self.edges = self.__initialise_edges()
@@ -248,6 +252,15 @@ class CSSHoneycomb:
     def isg_tick(self) -> None:
         """increment isg clock"""
         self.isg_clock += 1
+
+    def _all_qubit_keys(self) -> list[int]:
+        """Every data qubit and every ancilla in the circuit."""
+        return [v.key for v in self.vertices] + [e.ancilla.key for e in self.edges]
+
+    def _idle_keys(self, active) -> list[int]:
+        """Qubits that did not receive this layer's gate noise."""
+        acting = set(active)
+        return [key for key in self._all_qubit_keys() if key not in acting]
     
     # measurement protocol
 
@@ -493,27 +506,43 @@ class CSSHoneycomb:
         string += f"# prepare ancillas in {flavour} basis\nR "
         for a in ancilla_keys:
             string += str(a) + " "
+        string += "\n"
+        string += self.error_model.initialisation_error(ancilla_keys)
+        string += self.error_model.idling_error(self._idle_keys(ancilla_keys))
         string += self.tick()
         
         # If measuring X stabilizer, put ancillas in X basis
         if flavour == "X":
             string += "H "      # Hadamard
             for a in ancilla_keys:
-                string += str(a) + " "                
+                string += str(a) + " "
+            string += "\n"
+            string += self.error_model.hadamard_error(ancilla_keys)
+            string += self.error_model.idling_error(self._idle_keys(ancilla_keys))
             string += self.tick()
 
         # First round of CNOTs between v0 and ancilla
         string += "# fold stabilizers\nCNOT "
+        first_pairs = []
         for edge in target_edges:
             c, t = CSSHoneycomb.__get_CNOTs(edge, flavour=flavour, r=0)
             string += f"{c} {t} "
+            first_pairs.extend((c, t))
+        string += "\n"
+        string += self.error_model.cnot_error(first_pairs)
+        string += self.error_model.idling_error(self._idle_keys(first_pairs))
         string += self.tick()
 
         # Second round of CNOTs between v1 and ancilla
         string += "CNOT "
+        second_pairs = []
         for edge in target_edges:
             c, t = CSSHoneycomb.__get_CNOTs(edge, flavour=flavour, r=1)
             string += f"{c} {t} "
+            second_pairs.extend((c, t))
+        string += "\n"
+        string += self.error_model.cnot_error(second_pairs)
+        string += self.error_model.idling_error(self._idle_keys(second_pairs))
         string += self.tick()
 
         # If measuring X stabilizer, put ancillas back in Z basis
@@ -521,7 +550,19 @@ class CSSHoneycomb:
             string += "# rotate ancillas back to Z basis\nH "
             for a in ancilla_keys:
                 string += str(a) + " "
+            string += "\n"
+            string += self.error_model.hadamard_error(ancilla_keys)
+            string += self.error_model.idling_error(self._idle_keys(ancilla_keys))
             string += self.tick()
+
+        if flavour == "X":
+            z_basis = list(ancilla_keys)
+            x_basis = list(vertex_keys)
+        else:
+            z_basis = list(ancilla_keys) + list(vertex_keys)
+            x_basis = []
+        string += self.error_model.measurement_error(z_basis, x_basis)
+        string += self.error_model.idling_error(self._idle_keys(z_basis + x_basis))
 
         # measure ancillas
         string += f"#{colour}{flavour} edges\nM "
@@ -558,6 +599,9 @@ class CSSHoneycomb:
         string = "# initialise qubits in |0>\nR "
         for key in qubit_keys:
             string += str(key) + " "
+        string += "\n"
+        string += self.error_model.initialisation_error(qubit_keys)
+        string += self.error_model.idling_error(self._idle_keys(qubit_keys))
         return string
 
 
