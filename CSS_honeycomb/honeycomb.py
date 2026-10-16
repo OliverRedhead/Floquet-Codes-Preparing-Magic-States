@@ -384,7 +384,7 @@ class CSSHoneycomb:
         except KeyError:
             raise ValueError(f"No logical entry for round {name!r} in the schedule.") from None
 
-    def _logical_pauli(self, colour: str, flavour: str, basis: str) -> dict[int, str]:
+    def __logical_pauli(self, colour: str, flavour: str, basis: str) -> dict[int, str]:
         """
         Build the Pauli support {qubit_key: 'X' | 'Z'} of a logical.
 
@@ -398,7 +398,7 @@ class CSSHoneycomb:
         keys = self._get_logical_keys(colour, flavour)[basis]
         return {k: basis for k in (CSSHoneycomb.T_ANCILLA_KEY, *keys)}
 
-    def _write_observable(self, circuit_so_far: str, index: int, pauli_by_key: dict[int, str]) -> str:
+    def __write_observable(self, circuit_so_far: str, index: int, pauli_by_key: dict[int, str]) -> str:
         """
         Emit an OBSERVABLE_INCLUDE for a Pauli operator, adding the measurement
         records that make its value deterministic in a dynamic code.
@@ -447,7 +447,7 @@ class CSSHoneycomb:
         circuit = stim.Circuit(circuit_so_far)
 
         logical = stim.PauliString(circuit.num_qubits)
-        for k, p in pauli_by_key.items():
+        for k, p in pauli_by_key.items(): 
             logical[k] = p
 
         # Ask stim which measurements make "nothing -> logical" a valid flow.
@@ -496,7 +496,7 @@ class CSSHoneycomb:
         adds no measurement records, so the rec[] offsets are the same for each.
         """
         return "".join(
-            self._write_observable(circuit_so_far, i, self._logical_pauli(colour, flavour, b))
+            self.__write_observable(circuit_so_far, i, self.__logical_pauli(colour, flavour, b))
             for i, b in enumerate(bases)
         )
     
