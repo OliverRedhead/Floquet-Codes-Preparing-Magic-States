@@ -6,7 +6,7 @@ with the setup.
 I plan to use boundary and coboundary maps to move between homologies, and if we need to it would make using the 
 superlattice of the triangular toric code easier.
 """
-
+from __future__ import annotations #Allows definitions of classes before they are defined
 from abc import ABC, abstractmethod
 from collections.abc import Sequence
 from typing import Iterator
