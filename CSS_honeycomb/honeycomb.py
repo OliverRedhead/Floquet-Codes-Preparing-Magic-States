@@ -5,8 +5,12 @@ import numpy as np
 import stim
 
 from qubit_containers import Vertex, Edge, Plaquette, BoundaryPlaquette
+<<<<<<< HEAD
+from operations import Detector, Measurement
+=======
 from operations import Measurement, PauliString
 
+>>>>>>> main
 
 class CSSHoneycomb:
     """
@@ -59,6 +63,16 @@ class CSSHoneycomb:
         
         # This counts ISG updates
         self.isg_clock = 0
+<<<<<<< HEAD
+
+        # Parsed (colour, flavour) rounds, in the order get_measurement will be called.
+        self.measurement_cycle = None
+        # Filled on the first round. None means "not scanned yet".
+        self._init_detectors = None
+        # Last isg_clock on which an initialisation detector is written.
+        # Starts at 0 so the first round still runs the scan.
+        self._init_last_round = 0
+=======
         
         # set config
         self.preparation = None
@@ -80,6 +94,7 @@ class CSSHoneycomb:
             }
         
     
+>>>>>>> main
     
     def __initialise_vertices(self) -> list[Vertex]:
         """Initialise vertices, note that data qubits are initialised in this step too"""
@@ -692,6 +707,8 @@ class CSSHoneycomb:
         self.__record_measurements(colour, flavour, target_edges, target_vertices) # NOTE not sure if I need colour here
         
         detectors = self.get_detectors()
+        if self.isg_clock <= self._init_last_round:
+            detectors += self.find_init_detectors()
         string += self.write_detectors(detectors, self.clock)
         
         self.isg_tick()
@@ -761,8 +778,222 @@ class CSSHoneycomb:
 
         return string
 
-    def prepare_qubits(self) -> str:
+    _COLOUR_FROM_LETTER = {"r": "red", "g": "green", "b": "blue"}
+
+    def set_measurement_cycle(self, cycle: list[str]) -> None:
+        """Store the upcoming measurement rounds, in call order.
+
+        Each token is a colour letter plus a flavour, for example "rX" or "gZ".
+        `isg_clock` is the index into this list.
+
+        This function just takes the cycle (rX, gZ, bX, etc...) and 
+        converts into a list of colours and flavours which can be read by the code
         """
+<<<<<<< HEAD
+        parsed = []
+        for token in cycle:
+            colour = CSSHoneycomb._COLOUR_FROM_LETTER.get(token[0])
+            flavour = token[-1]
+            if colour is None or flavour not in ("X", "Z"):
+                raise ValueError(
+                    f"measurement cycle token must look like 'rX', not {token!r}"
+                )
+            parsed.append((colour, flavour))
+        self.measurement_cycle = parsed
+
+    def prepare_qubits(self, initialisation: dict | None = None) -> str:
+        """
+        Prepare data qubits and record the basis each one was prepared in.
+
+        Parameters
+        ----------
+        initialisation : dict | None
+            Map from vertex position `(x, y)` to `"X"`, `"Z"` or `"T"`.
+            With no map, every data qubit is prepared in `|0>` (`"Z"`).
+
+        Function takes the initialisation dictionary (from the json file) and initialises the qubits according to it
+        """
+        init_by_pos = None
+        if initialisation is not None:
+            init_by_pos = {}
+            for pos, basis in initialisation.items():
+                if basis not in ("X", "Z", "T"):
+                    raise ValueError(
+                        f"initialisation of {pos} must be 'X', 'Z' or 'T', not {basis!r}"
+                    )
+                init_by_pos[tuple(pos)] = basis
+
+        x_keys = []
+        z_keys = []
+        for v in self.vertices:
+            if init_by_pos is None:
+                basis = "Z"
+            else:
+                basis = init_by_pos.get(tuple(v.pos))
+                if basis is None:
+                    raise ValueError(f"no initialisation for vertex at {v.pos}")
+            v.init = basis
+            if basis == "X":
+                x_keys.append(v.key)
+            else:
+                z_keys.append(v.key)
+
+        if initialisation is None:
+            string = "# initialise qubits in |0>\nR "
+            for key in z_keys:
+                string += str(key) + " "
+            return string
+
+        string = ""
+        if z_keys:
+            string += "# initialise qubits in |0>\nR "
+            for key in z_keys:
+                string += str(key) + " "
+        if x_keys:
+            if string:
+                string += "\n"
+            string += "# initialise qubits in |+>\nRX "
+            for key in x_keys:
+                string += str(key) + " "
+        return string
+
+    def _stabilizer_death(self, colour: str, flavour: str) -> int | None:
+        """First cycle index whose measurement anticommutes with this stabilizer.
+
+        An opposite-flavour round kills the stabilizer when `SYNDOME_SCHEDULE`
+        names `colour` as the plaquette colour that opens or closes.
+        """
+        opposite = "X" if flavour == "Z" else "Z"
+        for t, (round_colour, round_flavour) in enumerate(self.measurement_cycle):
+            if round_flavour != opposite:
+                continue
+            schedule = CSSHoneycomb.SYNDOME_SCHEDULE[(round_colour, round_flavour)]
+            if colour == schedule["close"]:
+                return t
+        return None
+
+    def _plaquette_supports(self, plaquette, flavour: str) -> bool:
+        """
+        True when every vertex of this plaquette was prepared as `flavour`.
+        Basically checks if the plaquette is a stabiliser from the initialisation
+        """
+        vertices = [v for v in plaquette.vertices if isinstance(v, Vertex)]
+        if not vertices:
+            return False
+        return all(getattr(v, "init", None) == flavour for v in vertices)
+
+    def _scan_init_stabilizers(self) -> dict:
+        """Plaquette stabilizers created by the initialisation."""
+        stored = {}
+        for plaquette in self.plaquettes:
+            for flavour in ("X", "Z"):
+                if not self._plaquette_supports(plaquette, flavour):
+                    continue
+                death = self._stabilizer_death(plaquette.colour, flavour)
+                if death is None or not (0 < death):
+                    continue
+                stored[(plaquette.key, flavour)] = {
+                    "plaquette": plaquette,
+                    "flavour": flavour,
+                    "death": death,
+                    "emitted": False,
+                }
+        self._init_last_round = max(
+            (spec["death"] - 1 for spec in stored.values()),
+            default=-1,
+        )
+        return stored
+
+    def _readout_measurements(self, plaquette, flavour: str, death: int) -> list[Measurement]:
+        """One readout of this plaquette, taken in `flavour` before it is killed.
+
+        The readout is the latest round `t < death` whose flavour matches and
+        whose schedule names this plaquette colour as open or close. Only that
+        round's measurements are kept: edges of the colour measured then, and,
+        for a boundary plaquette, data qubits of the plaquette measured then.
+        An earlier round of the same check is left out, because a second
+        measurement cancels the prepared state out of the parity.
+        """
+        round_index = None
+        round_colour = None
+        for t, (colour, round_flavour) in enumerate(self.measurement_cycle):
+            if t >= death:
+                break
+            if round_flavour != flavour:
+                continue
+            schedule = CSSHoneycomb.SYNDOME_SCHEDULE[(colour, round_flavour)]
+            if plaquette.colour not in (schedule["open"], schedule["close"]):
+                continue
+            round_index = t
+            round_colour = colour
+
+        if round_index is None:
+            return []
+
+        times = []
+        for m in self.measurements:
+            if not times or times[-1] != m.time:
+                times.append(m.time)
+        if round_index >= len(times):
+            return []
+        readout_time = times[round_index]
+
+        ancillas = {
+            edge.ancilla
+            for edge in plaquette.edges
+            if isinstance(edge, Edge) and edge.colour == round_colour
+        }
+        vertices = set()
+        if isinstance(plaquette, BoundaryPlaquette):
+            vertices = {v for v in plaquette.vertices if isinstance(v, Vertex)}
+
+        return [
+            m
+            for m in self.measurements
+            if m.flavour == flavour
+            and m.time == readout_time
+            and (m.target in ancillas or m.target in vertices)
+        ]
+
+    def find_init_detectors(self) -> list[Detector]:
+        """Detectors fixed by the prepared state, emitted once each.
+
+        The scan runs on the first round. A stabilizer that dies at step `t`
+        is stored then and written only when `isg_clock == t - 1`, so later
+        rounds do not construct it again. `get_measurement` stops calling
+        this once `isg_clock` passes the latest of those write rounds.
+        """
+        if not self.measurement_cycle:
+            return []
+        if self._init_detectors is None:
+            if self.isg_clock != 0:
+                return []
+            self._init_detectors = self._scan_init_stabilizers()
+
+        detectors = []
+        for spec in self._init_detectors.values():
+            if spec["emitted"] or self.isg_clock != spec["death"] - 1:
+                continue
+            records = self._readout_measurements(
+                spec["plaquette"], spec["flavour"], spec["death"]
+            )
+            if not records:
+                spec["emitted"] = True
+                continue
+            spec["emitted"] = True
+            detectors.append(
+                Detector(
+                    [],
+                    spec["plaquette"].colour,
+                    0,
+                    close_meas=records,
+                    flavour=spec["flavour"],
+                    close_time=records[-1].time,
+                )
+            )
+        return detectors
+
+=======
         Prepare all qubits for the start of the circuit.
 
         Every qubit is reset in the Z basis by default. If a preparation config
@@ -813,6 +1044,7 @@ class CSSHoneycomb:
 
         return string
         
+>>>>>>> main
 
     """
     helper methods
