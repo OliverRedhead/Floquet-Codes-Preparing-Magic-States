@@ -1,6 +1,7 @@
 {
     "name": "surface_d3",
     "qubits": [
+<<<<<<< HEAD:CSS_honeycomb/preparation/5x3.json
         {"pos": [0, 0], "init": "X"},
         {"pos": [1, 0], "init": "X"},
         {"pos": [2, 0], "init": "X"},
@@ -20,6 +21,9 @@
     ],
     "qubit": [
         {"pos": [0, 0], "init": "X"},
+=======
+        {"pos": [0, 0], "init": "Z"},
+>>>>>>> main:CSS_honeycomb/config/5x3.json
         {"pos": [1, 0], "init": "Z"},
         {"pos": [2, 0], "init": "Z"},
         {"pos": [3, 0], "init": "Z"},
@@ -27,7 +31,7 @@
         {"pos": [0, 1], "init": "X"},
         {"pos": [1, 1], "init": "X"},
         {"pos": [2, 1], "init": "T"},
-        {"pos": [3, 1], "init": "Z"},
+        {"pos": [3, 1], "init": "X"},
         {"pos": [4, 1], "init": "X"},
         {"pos": [5, 1], "init": "X"},
         {"pos": [1, 2], "init": "X"},
