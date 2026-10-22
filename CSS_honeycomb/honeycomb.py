@@ -5,7 +5,7 @@ import numpy as np
 import stim
 
 from qubit_containers import Vertex, Edge, Plaquette, BoundaryPlaquette
-from operations import Detector, Measurement, PauliString
+from operations import Detector, Measurement, PauliString, InitDetector
 from errors import ErrorModel
 
 
@@ -18,10 +18,11 @@ class CSSHoneycomb:
     """
     initialisation methods
     """
-    
+
     T_ANCILLA_KEY = 0
 
-    def __init__(self, ncols : int = 5, nrows : int = 4, error_model: str | None = None, *, config_filepath: str | None = None) -> None:
+    def __init__(self, ncols: int = 5, nrows: int = 4, error_model: str | None = None, *,
+                 config_filepath: str | None = None) -> None:
         """
         Initialise CSSHoneycomb instance. Automatically generates vertices (and qubits) based on input nrows and ncols.
 
@@ -38,8 +39,8 @@ class CSSHoneycomb:
 
         Notes
         -----
-        - Coordinates are initialised in integer (square) system. This is more natural for the heavy hex. 
-            I will try and make sure there are adequate methods to let us set up the circuit in both square 
+        - Coordinates are initialised in integer (square) system. This is more natural for the heavy hex.
+            I will try and make sure there are adequate methods to let us set up the circuit in both square
             and hexagonal coordinates, but square makes most sense when initialising qubits and things.
         """
 
@@ -51,27 +52,39 @@ class CSSHoneycomb:
         self.edges = self.__initialise_edges()
         self.plaquettes = self.__initialise_plaquettes()
         self.plaquettes += self.__initialise_boundary_plaquettes()
-        
-        self.qubit_coords = {q.pos : q.key for q in self.vertices}
-        
-        self.vertices.append(Vertex(0, (self.ncols//2, -1))) # ancilla for T state
-        
+
+        self.qubit_coords = {q.pos: q.key for q in self.vertices}
+
+        self.vertices.append(Vertex(0, (self.ncols // 2, -1)))  # ancilla for T state
+
         self.measurements = []
-        
+
         # This counts our circuit level ticks
         self.clock = 0
-        
+
         # This counts ISG updates
         self.isg_clock = 0
 
         # Parsed (colour, flavour) rounds, in the order get_measurement will be called.
         self.measurement_cycle = None
+
+        # --- plaquette-level initialisation detectors ---
         # Filled on the first round. None means "not scanned yet".
         self._init_detectors = None
         # Last isg_clock on which an initialisation detector is written.
         # Starts at 0 so the first round still runs the scan.
         self._init_last_round = 0
-        
+
+        # --- measurement-level initialisation detectors ---
+        # (flavour, frozenset of data-qubit keys) for every Pauli measured in a
+        # previous round. Used to decide whether a prepared-state eigenvalue has
+        # been disturbed before it is read out.
+        self._measured_ops = []
+        # Edges / vertices that have already been considered, so each is
+        # only ever checked on its first measurement.
+        self._init_edge_done = set()
+        self._init_vertex_done = set()
+
         # set config
         self.preparation = None
         self.logical_schedule = None   # {"rXX": {"X": [keys], "Z": [keys]}, ...}
@@ -90,20 +103,18 @@ class CSSHoneycomb:
                 }
                 for name, ops in raw["logical_schedule"].items()
             }
-        
-    
-    
+
     def __initialise_vertices(self) -> list[Vertex]:
         """Initialise vertices, note that data qubits are initialised in this step too"""
 
-        vertices = [] 
-        key = 1 # we will put our ancilla at key=0
+        vertices = []
+        key = 1  # we will put our ancilla at key=0
 
-        for y in range(self.nrows):    
+        for y in range(self.nrows):
             n_vertices = self.ncols if y in (0, self.nrows - 1) else self.ncols + 1
 
             for x in range(n_vertices):
-                
+
                 x_pos = x + y - 1 if y > 0 else x
 
                 vertices.append(Vertex(key, (x_pos, y)))
@@ -124,7 +135,7 @@ class CSSHoneycomb:
         def make_edge(v0: Vertex, v1: Vertex, direction: str) -> Edge:
             edge_key = len(edges)
             colour = CSSHoneycomb.__colour_edge(v0.pos[0], direction)
-            ancilla_key = len(self.vertices) + edge_key + 1 # +1 is because I add the ancilla for logicals later.
+            ancilla_key = len(self.vertices) + edge_key + 1  # +1 is because I add the ancilla for logicals later.
 
             return Edge(
                 edge_key,
@@ -218,17 +229,17 @@ class CSSHoneycomb:
         plaquette-building loop below.
         """
         vertex_coords = {
-        vertex.get_coordinates(): vertex
-        for vertex in self.vertices
+            vertex.get_coordinates(): vertex
+            for vertex in self.vertices
         }
 
         offsets = [(0, 0), (1, 0), (2, 0), (2, 1), (1, 1), (0, 1)]
 
         boundaries = [
-            ("Z", [(x, -1) for x in range(1, self.ncols - 2, 2)]),                       # top
+            ("Z", [(x, -1) for x in range(1, self.ncols - 2, 2)]),  # top
             ("Z", [(x, self.nrows - 1) for x in range(self.nrows - 1, self.ncols + self.nrows - 4, 2)]),  # bottom
-            ("X", [(y - 2, y) for y in range(1, self.nrows - 1)]),                       # left
-            ("X", [(self.ncols - 1 + y, y) for y in range(0, self.nrows - 2)]),               # right
+            ("X", [(y - 2, y) for y in range(1, self.nrows - 1)]),  # left
+            ("X", [(self.ncols - 1 + y, y) for y in range(0, self.nrows - 2)]),  # right
         ]
 
         boundary_plaquettes = []
@@ -244,8 +255,7 @@ class CSSHoneycomb:
                     boundary_plaquettes.append(plaquette)
 
         return boundary_plaquettes
-        
-    
+
     """
     stim interaction methods
     """
@@ -258,10 +268,10 @@ class CSSHoneycomb:
 
         NOTE For now, the circuit only works in square coordinates.
         """
-        
-        if coordinates != 'square': # NOTE this doesnt work anymore.
+
+        if coordinates != 'square':  # NOTE this doesnt work anymore.
             return self.__initialise_circuit_hex()
-        
+
         string = "# data qubits\n"
         for v in self.vertices:
             string += str(v.qubit) + "\n"
@@ -269,14 +279,14 @@ class CSSHoneycomb:
         string += "# ancilla qubits\n"
         for e in self.edges:
             string += str(e.ancilla) + "\n"
-        
+
         return string
-    
+
     def __initialise_circuit_hex(self):
-        string = ""        
-        
+        string = ""
+
         coords = [v.pos for v in self.vertices]
-        
+
         hex_coords = CSSHoneycomb.square_to_hex(coords)
         for i, (x, y) in enumerate(hex_coords):
             string += f"QUBIT_COORDS({x}, {y}) {i}\n"
@@ -286,11 +296,11 @@ class CSSHoneycomb:
         """increase the clock and return the stim TICK command"""
         self.clock += 1
         return "\nTICK\n"
-    
+
     def isg_tick(self) -> None:
         """increment isg clock"""
         self.isg_clock += 1
-        
+
     def _all_qubit_keys(self) -> list[int]:
         """Every data qubit and every ancilla in the circuit."""
         return [v.key for v in self.vertices] + [e.ancilla.key for e in self.edges]
@@ -299,7 +309,7 @@ class CSSHoneycomb:
         """Qubits that did not receive this layer's gate noise."""
         acting = set(active)
         return [key for key in self._all_qubit_keys() if key not in acting]
-    
+
     # measurement protocol
 
     @staticmethod
@@ -321,20 +331,16 @@ class CSSHoneycomb:
         -------
         cnot : tuple[int, int]
             A tuple of keys of the cnot. Should be in order (control, target).
-
-        Notes
-        -----
-        Need to make sure that the order of this is correct!
         """
         vertex = edge.vertices[r]
         ancilla = edge.ancilla
 
         if flavour == "X":
-            # ZZ: ancilla -> data
+            # XX: ancilla (measured in X basis) controls the data qubits
             return ancilla.key, vertex.key
 
         elif flavour == "Z":
-            # XX: data -> ancilla
+            # ZZ: data qubits control the ancilla (measured in Z basis)
             return vertex.key, ancilla.key
 
         else:
@@ -350,12 +356,12 @@ class CSSHoneycomb:
         flavour : str
             Either 'X' or 'Z'. Determines boundary conditions.
         """
-        
+
         vertex_coords = {
-            v.pos : v
+            v.pos: v
             for v in self.vertices
         }
-        
+
         target_vertices = [
             v
             for p in self.plaquettes
@@ -364,18 +370,18 @@ class CSSHoneycomb:
             and p.colour != colour
             for v in p.vertices.cells
         ] + [
-            vertex_coords[(0,0)], 
+            vertex_coords[(0, 0)],
             vertex_coords[(self.ncols + self.nrows - 3, self.nrows - 1)]
         ]
-        
+
         targets = []
         for v in target_vertices:
             coboundary_colours = [e.colour for e in v.coboundary()]
             if colour not in coboundary_colours:
                 targets.append(v)
-            
+
         return list(set(targets))
-    
+
     def _get_logical_keys(self, colour: str, flavour: str) -> dict[str, list[int]]:
         """
         Look up the data-qubit keys supporting each logical operator.
@@ -394,7 +400,7 @@ class CSSHoneycomb:
         -------
         dict[str, list[int]]
             {"X": [...], "Z": [...]}: qubit keys of the X and Z logicals.
-            The T ancilla is not included; see `_logical_pauli`.
+            The T ancilla is not included; see `__logical_pauli`.
         """
         if self.logical_schedule is None:
             raise ValueError("No logical_schedule loaded; pass config_filepath.")
@@ -460,15 +466,15 @@ class CSSHoneycomb:
         Notes
         -----
         - Pauli targets in OBSERVABLE_INCLUDE read the operator non-destructively,
-        so nothing is measured and `self.measurements` is unaffected.
+          so nothing is measured and `self.measurements` is unaffected.
         - Run this on the noiseless circuit. The records found remain valid once
-        noise instructions are inserted.
+          noise instructions are inserted.
         - Requires stim >= 1.15 for `Circuit.solve_flow_measurements`.
         """
         circuit = stim.Circuit(circuit_so_far)
 
         logical = stim.PauliString(circuit.num_qubits)
-        for k, p in pauli_by_key.items(): 
+        for k, p in pauli_by_key.items():
             logical[k] = p
 
         # Ask stim which measurements make "nothing -> logical" a valid flow.
@@ -487,7 +493,7 @@ class CSSHoneycomb:
         return f"OBSERVABLE_INCLUDE({index}) {paulis} {rec_str}\n"
 
     def write_logical_observable(self, circuit_so_far: str, colour: str, flavour: str,
-                                bases: tuple[str, ...] = ("Z", "X")) -> str:
+                                 bases: tuple[str, ...] = ("Z", "X")) -> str:
         """
         Emit one OBSERVABLE_INCLUDE per requested logical basis, for the logical
         representatives valid after round (colour, flavour).
@@ -520,7 +526,7 @@ class CSSHoneycomb:
             self.__write_observable(circuit_so_far, i, self.__logical_pauli(colour, flavour, b))
             for i, b in enumerate(bases)
         )
-    
+
     """
     This dictionary holds the detector cell schedule. It is of the form
            dict[ tuple[str] : dict[ str : str ] ]
@@ -532,12 +538,12 @@ class CSSHoneycomb:
     Now we can find what colour detector cells **open** and **close** with those keywords.
     """
     SYNDOME_SCHEDULE = {
-        ('red', 'Z')    : {'open' : 'blue',  'close' : 'green'},
-        ('green', 'X')  : {'open' : 'red',   'close' : 'blue'},
-        ('blue', 'Z')   : {'open' : 'green', 'close' : 'red'},
-        ('red', 'X')    : {'open' : 'blue',  'close' : 'green'},
-        ('green', 'Z')  : {'open' : 'red',   'close' : 'blue'},
-        ('blue', 'X')   : {'open' : 'green', 'close' : 'red'},
+        ('red', 'Z'): {'open': 'blue', 'close': 'green'},
+        ('green', 'X'): {'open': 'red', 'close': 'blue'},
+        ('blue', 'Z'): {'open': 'green', 'close': 'red'},
+        ('red', 'X'): {'open': 'blue', 'close': 'green'},
+        ('green', 'Z'): {'open': 'red', 'close': 'blue'},
+        ('blue', 'X'): {'open': 'green', 'close': 'red'},
     }
 
     def __record_measurements(self, colour, flavour, target_edges, target_vertices):
@@ -548,20 +554,31 @@ class CSSHoneycomb:
         colour : str
             'red', 'green' or 'blue'. Colour of edge measurements this round.
         flavour : str
-            'X' or 'Z'. Flavour of edge measureremenets this round.
+            'X' or 'Z'. Flavour of edge measurements this round.
         target_edges : list[Edge]
             list of target edges measured this round, produced by get_measurement() method
         target_vertices : list[Vertex]
             list of target vertices measured this round, produced by get_measurement() method
+
+        Returns
+        -------
+        edge_meas : list[tuple[Edge, Measurement]]
+            Each edge measured this round paired with its measurement.
+        vertex_meas : list[tuple[Vertex, Measurement]]
+            Each single-body (boundary) measurement this round paired with its vertex.
         """
 
         open_colour = CSSHoneycomb.SYNDOME_SCHEDULE[(colour, flavour)]['open']
         close_colour = CSSHoneycomb.SYNDOME_SCHEDULE[(colour, flavour)]['close']
 
+        edge_meas = []
+        vertex_meas = []
+
         # construct plaquettes in bulk with edges.
         for edge in target_edges:
             m = Measurement(edge.ancilla, self.clock, flavour)
             self.measurements.append(m)          # once per real M instruction
+            edge_meas.append((edge, m))
 
             for p in edge.coboundary():
                 if p.colour == open_colour:
@@ -570,10 +587,10 @@ class CSSHoneycomb:
                     p.add_measurement(m, self.isg_clock, "close")
 
         # construct boundary plaquettes with single qubit measurements where applicable.
-
         for vertex in target_vertices:
             m = Measurement(vertex, self.clock, flavour)
             self.measurements.append(m)
+            vertex_meas.append((vertex, m))
 
             for edge in vertex.coboundary():
                 for p in edge.coboundary():
@@ -583,78 +600,88 @@ class CSSHoneycomb:
                         p.add_measurement(m, self.isg_clock, "open")
                     elif p.colour == close_colour:
                         p.add_measurement(m, self.isg_clock, "close")
-                                     
+
+        return edge_meas, vertex_meas
+
     def get_detectors(self):
         """Get a list of the valid detectors that close at the given time step."""
         detectors = []
         for p in self.plaquettes:
-                    
+
             d = p.detector_closes(self.isg_clock)
             if d is not None:
                 detectors.append(d)
-            
+
         return detectors
-    
+
     def write_detectors(self, detectors, time) -> str:
         """Given a list of valid detectors, write them in stim.
-        
+
         Parameters
         ----------
-        detectors : list[Detector]
+        detectors : list[Detector | InitDetector]
             list of valid detectors.
-            
-        Returns 
+        time : int
+            Time coordinate written into each DETECTOR.
+
+        Returns
         -------
         detector_string : str
             Detector string to pass to stim.
         """
-        
-        def find_measurement_index(m : Measurement):
+
+        def find_measurement_index(m: Measurement):
             """find the rec index of a target measurement in the self.measurements list"""
             idx = self.measurements.index(m)
             return idx - len(self.measurements)
-        
+
         detector_string = "\n"
         for d in detectors:
-            x,y = d.get_pos()
+            x, y = d.get_pos()
             detector_string += f"DETECTOR({x}, {y}, {time}) "
             for m in d.open_meas + d.close_meas:
                 idx = find_measurement_index(m)
                 detector_string += f"rec[{idx}] "
-            
+
             detector_string += "\n"
-        
-        return detector_string        
+
+        return detector_string
 
     def get_measurement(self, colour: str, flavour: str) -> str:
         """
-        By specifying a colour and flavour of measurement, we can 
+        By specifying a colour and flavour of measurement, we can
         measure all edges of the given colour in the basis specified.
-        
-        I want to include boundaries in here too.
+
+        Boundary single-body measurements are included too.
 
         Parameters
         ----------
         colour : str
             either 'red', 'green' or 'blue'. Indicates what colour of edges we should measure.
         flavour : str
-            Either 'X' or 'Z', indicates the measurement basis. Note that the 'X' circuit is a 
+            Either 'X' or 'Z', indicates the measurement basis. Note that the 'X' circuit is a
             little bit longer.
 
         Returns
         -------
         circuit string : str
             A string in `stim` syntax that we can pass directly in. Should be commented adequately too.
-            
+
         Notes
         -----
         Our single qubits spend some time idling here. I'm not sure how avoidable this is.
+
+        Three kinds of detector are written at the end of each round:
+        - ordinary plaquette detectors that close this round (`get_detectors`),
+        - plaquette detectors fixed by the prepared state (`find_init_detectors`),
+        - single-measurement detectors fixed by the prepared state, on edges and
+          single-body measurements (`_find_measurement_init_detectors`).
         """
         string = ""
 
         target_edges = [e for e in self.edges if e.colour == colour]
         ancilla_keys = [e.ancilla.key for e in target_edges]
-        
+
         target_vertices = self.__get_boundary_targets(colour, flavour)
         vertex_keys = [v.key for v in target_vertices]
 
@@ -666,7 +693,7 @@ class CSSHoneycomb:
         string += self.error_model.initialisation_error(ancilla_keys)
         string += self.error_model.idling_error(self._idle_keys(ancilla_keys))
         string += self.tick()
-        
+
         # If measuring X stabilizer, put ancillas in X basis
         if flavour == "X":
             string += "H "      # Hadamard
@@ -674,7 +701,7 @@ class CSSHoneycomb:
                 string += str(a) + " "
             string += "\n"
             string += self.error_model.hadamard_error(ancilla_keys)
-            string += self.error_model.idling_error(self._idle_keys(ancilla_keys))            
+            string += self.error_model.idling_error(self._idle_keys(ancilla_keys))
             string += self.tick()
 
         # First round of CNOTs between v0 and ancilla
@@ -701,7 +728,7 @@ class CSSHoneycomb:
         string += self.error_model.idling_error(self._idle_keys(second_pairs))
         string += self.tick()
 
-        # If measuring X stabilizer, put ancillas back in Z basis
+        # If measuring X stabilizer, put ancillas (and boundary qubits) back in Z basis
         if flavour == "X":
             string += "# rotate ancillas back to Z basis\nH "
             for k in ancilla_keys + vertex_keys:
@@ -718,8 +745,12 @@ class CSSHoneycomb:
         string += f"#{colour}{flavour} edges\nM "
         for a in ancilla_keys:
             string += str(a) + " "
-        
+
         # measure boundary data qubits (always in the Z basis)
+
+        # this is to make sure errors added in correct order
+        # measure -> error -> hadamard -> error
+        hadamard_string = ""
         if vertex_keys:
             string += f"\n#{colour}{flavour} boundary\nM "
             for v in vertex_keys:
@@ -727,25 +758,32 @@ class CSSHoneycomb:
 
             # undo the basis change so the qubits are back in the X basis
             if flavour == "X":
-                string += "\n# restore boundary qubits to X basis\nH "
+                hadamard_string += "\n# restore boundary qubits to X basis\nH "
                 for v in vertex_keys:
-                    string += str(v) + " "
-                string += "\n"
-                string += self.error_model.hadamard_error(vertex_keys)
-                    
+                    hadamard_string += str(v) + " "
+                hadamard_string += "\n"
+                hadamard_string += self.error_model.hadamard_error(vertex_keys)
+
         string += "\n"
         string += self.error_model.idling_error(self._idle_keys(ancilla_keys + vertex_keys))
-            
-                
-        self.__record_measurements(colour, flavour, target_edges, target_vertices) # NOTE not sure if I need colour here
-        
+
+        string += hadamard_string
+
+        edge_meas, vertex_meas = self.__record_measurements(
+            colour, flavour, target_edges, target_vertices
+        )
+
         detectors = self.get_detectors()
         if self.isg_clock <= self._init_last_round:
             detectors += self.find_init_detectors()
+        detectors += self._find_measurement_init_detectors(flavour, edge_meas, vertex_meas)
         string += self.write_detectors(detectors, self.clock)
-        
+
+        # Only now does this round become "history" for later rounds.
+        self._log_measured_ops(flavour, edge_meas, vertex_meas)
+
         self.isg_tick()
-    
+
         return string
 
     def final_readout(self) -> str:
@@ -775,15 +813,15 @@ class CSSHoneycomb:
         Notes
         -----
         - Each `PauliString` is appended to `self.measurements` before
-        `write_detectors` is called, since the `rec[-k]` offsets are looked up
-        from that list. The order of `MPP` lines must therefore match the order
-        of appends, which it does because both happen in the same loop.
+          `write_detectors` is called, since the `rec[-k]` offsets are looked up
+          from that list. The order of `MPP` lines must therefore match the order
+          of appends, which it does because both happen in the same loop.
         - The detector is closed directly with `Detector.add_measurement`, not via
-        `Plaquette.add_measurement`, so that the readout is attached to the
-        specific open detector and not to an older, already-closed one of the
-        same flavour on that plaquette.
+          `Plaquette.add_measurement`, so that the readout is attached to the
+          specific open detector and not to an older, already-closed one of the
+          same flavour on that plaquette.
         - Advances `self.clock` (via `tick`) and `self.isg_clock` (via
-        `isg_tick`), like `get_measurement`.
+          `isg_tick`), like `get_measurement`.
         """
         open_pairs = [
             (p, d)
@@ -818,7 +856,7 @@ class CSSHoneycomb:
         Each token is a colour letter plus a flavour, for example "rX" or "gZ".
         `isg_clock` is the index into this list.
 
-        This function just takes the cycle (rX, gZ, bX, etc...) and 
+        This function just takes the cycle (rX, gZ, bX, etc...) and
         converts into a list of colours and flavours which can be read by the code
         """
         parsed = []
@@ -855,9 +893,9 @@ class CSSHoneycomb:
         Notes
         -----
         - Each data vertex gets `v.init` set to its basis; this is what
-          `_plaquette_supports` uses to find stabilizers fixed by the
-          prepared state. The T qubit has `v.init == "T"`, so it never
-          supports an X or Z plaquette.
+          `_plaquette_supports` and `_find_measurement_init_detectors` use to
+          find stabilizers fixed by the prepared state. The T qubit has
+          `v.init == "T"`, so it never supports an X or Z stabilizer.
         - The T ancilla is always reset in |0> (then H'd if a T qubit exists).
         - 'X' -> |+>, 'Y' -> |+i>, 'Z' -> |0>, 'T' -> |0> then Bell pair.
         - After the resets, |0> takes X_ERROR, |+> takes Z_ERROR, and |+i>
@@ -934,7 +972,10 @@ class CSSHoneycomb:
             string += self.tick()
 
         return string
-    
+
+    """
+    initialisation detectors: plaquette level
+    """
 
     def _init_readout_round(self, plaquette, flavour: str) -> int | None:
         """First same-basis round that closes this plaquette, or None.
@@ -1024,7 +1065,7 @@ class CSSHoneycomb:
         ]
 
     def find_init_detectors(self) -> list[Detector]:
-        """Detectors fixed by the prepared state, emitted once each.
+        """Plaquette detectors fixed by the prepared state, emitted once each.
 
         The scan runs on the first round. A stabilizer whose readout is
         round `t` is written when `isg_clock == t`, including round 0.
@@ -1045,10 +1086,9 @@ class CSSHoneycomb:
             records = self._readout_measurements(
                 spec["plaquette"], spec["flavour"], spec["round"]
             )
-            if not records:
-                spec["emitted"] = True
-                continue
             spec["emitted"] = True
+            if not records:
+                continue
             detectors.append(
                 Detector(
                     [],
@@ -1061,6 +1101,88 @@ class CSSHoneycomb:
             )
         return detectors
 
+    """
+    initialisation detectors: single-measurement level
+    """
+
+    def _commutes_with_history(self, flavour: str, keys: frozenset) -> bool:
+        """
+        True if a `flavour`-type Pauli on `keys` commutes with every Pauli
+        measured in earlier rounds.
+
+        Pauli strings of different flavour anticommute exactly when they overlap
+        on an odd number of qubits; same-flavour strings always commute. The
+        parity matters: if ZZ(a, b) was measured before XX(a, b), the overlap is
+        two, the operators commute, and the XX outcome is still deterministic.
+        """
+        for f, support in self._measured_ops:
+            if f != flavour and len(support & keys) % 2 == 1:
+                return False
+        return True
+
+    def _find_measurement_init_detectors(self, flavour: str, edge_meas: list, vertex_meas: list) -> list:
+        """
+        Detectors on single edge or single-body measurements whose outcome is
+        fixed by the prepared state.
+
+        - An edge measurement `F F` is fixed when both endpoints were prepared
+          in `F` (|0> for Z, |+> for X) and nothing measured earlier anticommutes
+          with it.
+        - A single-body measurement `F` on a vertex is fixed when that vertex
+          was prepared in `F` and nothing measured earlier anticommutes with it.
+
+        Each edge or vertex is considered only on its first measurement. The
+        condition can only get harder to satisfy as history grows, so a later
+        measurement can never newly qualify.
+
+        Must be called after this round's measurements are recorded but BEFORE
+        `_log_measured_ops`, so this round does not count as its own history.
+        (Same-flavour measurements commute, so excluding it is also correct.)
+
+        Returns
+        -------
+        list[InitDetector]
+            Each has expected parity 0, since every preparable state is a +1
+            eigenstate of its own Pauli.
+        """
+        detectors = []
+
+        for edge, m in edge_meas:
+            akey = edge.ancilla.key
+            if akey in self._init_edge_done:
+                continue
+            self._init_edge_done.add(akey)
+
+            verts = edge.vertices
+            keys = frozenset(v.key for v in verts)
+            if (all(getattr(v, "init", None) == flavour for v in verts)
+                    and self._commutes_with_history(flavour, keys)):
+                (x0, y0), (x1, y1) = verts[0].pos, verts[1].pos
+                detectors.append(
+                    InitDetector(
+                        m, ((x0 + x1) / 2, (y0 + y1) / 2), edge.colour, flavour
+                    )
+                )
+
+        for vertex, m in vertex_meas:
+            if vertex.key in self._init_vertex_done:
+                continue
+            self._init_vertex_done.add(vertex.key)
+
+            if (getattr(vertex, "init", None) == flavour
+                    and self._commutes_with_history(flavour, frozenset({vertex.key}))):
+                detectors.append(
+                    InitDetector(m, vertex.pos, None, flavour)
+                )
+
+        return detectors
+
+    def _log_measured_ops(self, flavour: str, edge_meas: list, vertex_meas: list) -> None:
+        """Add this round's measured Paulis to the history used for commutation checks."""
+        for edge, _ in edge_meas:
+            self._measured_ops.append((flavour, frozenset(v.key for v in edge.vertices)))
+        for vertex, _ in vertex_meas:
+            self._measured_ops.append((flavour, frozenset({vertex.key})))
 
     """
     helper methods
@@ -1072,12 +1194,12 @@ class CSSHoneycomb:
         Helper for colouring plaquettes.
         """
         brg = ['blue', 'red', 'green']
-        return brg[x%3]
-    
+        return brg[x % 3]
+
     @staticmethod
     def __colour_edge(x, direction):
         """
-        Helper for colouring edges. 
+        Helper for colouring edges.
         """
         rgb = ['red', 'green', 'blue']
         if direction == "vertical":
@@ -1158,7 +1280,7 @@ class CSSHoneycomb:
             x = None
             for cand in range(x_est - 2, x_est + 3):
                 if y % 2 == 0:
-                    test = cand + (2*a) * (cand // 2)
+                    test = cand + (2 * a) * (cand // 2)
                 else:
                     test = cand + a * ((cand + 1) // 2) + a * ((cand - 1) // 2)
                 if np.isclose(test, xh):
@@ -1171,19 +1293,18 @@ class CSSHoneycomb:
             square_coords.append((x, y))
 
         return np.array(square_coords)
-    
 
     """
     visualisation methods
     """
 
     PALETTE = {
-        'red' : '#e74c3c', 
-        'green' : '#2ecc71',
-        'blue' : '#3498db', 
+        'red': '#e74c3c',
+        'green': '#2ecc71',
+        'blue': '#3498db',
     }
 
-    def plot_surface(self, coordinates="square", bulge=0.35, n_arc=16, savepath = None, show=True):
+    def plot_surface(self, coordinates="square", bulge=0.35, n_arc=16, savepath=None, show=True):
 
         """Visualise the surface."""
 
@@ -1202,6 +1323,10 @@ class CSSHoneycomb:
                 f"`coordinates` must be 'square' or 'hex', not {coordinates!r}"
             )
 
+        # All vertex coordinates, mapped once (used for the plaquette radius estimate and the scatter).
+        coords = np.array([v.get_coordinates() for v in self.vertices])
+        mapped_coords = coord_map(np.asarray(coords, dtype=float))
+
         for p in self.plaquettes:
 
             p_coords = coord_map(
@@ -1209,11 +1334,6 @@ class CSSHoneycomb:
                     p.get_coordinates(ordered=True),
                     dtype=float
                 )
-            )
-
-            coords = np.array([v.get_coordinates() for v in self.vertices])
-            mapped_coords = coord_map(
-               np.asarray(coords, dtype=float)
             )
 
             if len(p) == 6:
@@ -1307,7 +1427,6 @@ class CSSHoneycomb:
 
                 plt.gca().add_patch(circle)
 
-
         for e in self.edges:
 
             e_coords = coord_map(
@@ -1334,7 +1453,7 @@ class CSSHoneycomb:
 
         plt.axis("equal")
         plt.gca().yaxis.set_inverted(True)
-        
+
         if savepath is not None:
             plt.savefig(savepath)
 
@@ -1381,7 +1500,7 @@ class CSSHoneycomb:
 
         remaining = [p_coords[(i1 + k) % n] for k in range(1, n - 1)]
         return np.vstack([arc, np.asarray(remaining)])
-    
+
     @staticmethod
     def __bulge_edge_outward(p0, p1, outward_dir, bulge, n_arc=16):
         """
@@ -1410,4 +1529,3 @@ class CSSHoneycomb:
         arc = (1 - t) ** 2 * p0 + 2 * (1 - t) * t * control + t ** 2 * p1
 
         return arc
-    

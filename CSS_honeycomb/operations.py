@@ -195,7 +195,7 @@ class Cnot(Gate):
 
 """Detectors are a special (classical) type of operation that compare measurement outcomes"""
     
-class Detector(Operation):
+class Detector:
 
     """
     In stim, for decoding purposes, detectors are given space-time coordinates. So we will need to specify
@@ -257,9 +257,6 @@ class Detector(Operation):
         for m in self.open_meas + self.close_meas:
             if m.flavour != self.flavour:
                 raise NotImplementedError("Measurement cannot have different flavour to Detector.")
-
-        # the self.time attribute is given as the isg_time
-        super().__init__(isg_open_time)
         
     def is_valid(self):
         """
@@ -324,8 +321,7 @@ class Detector(Operation):
             
         else:
             raise NotImplementedError(f"end must be 'open' or 'close', not {end}")
-        
-        
+            
     def get_pos(self):
         """Compute the detector position as the COM of its qubits."""
         records = self.open_meas if self.open_meas else self.close_meas
@@ -334,3 +330,17 @@ class Detector(Operation):
     def is_closed(self) -> bool:
         return self.close_time is not None
             
+            
+class InitDetector:
+    """A detector on a single measurement whose outcome is fixed by the
+    prepared state (expected parity 0). Quacks like Detector for write_detectors."""
+
+    def __init__(self, measurement, pos, colour, flavour):
+        self.open_meas = []
+        self.close_meas = [measurement]
+        self.colour = colour
+        self.flavour = flavour
+        self._pos = pos
+
+    def get_pos(self):
+        return self._pos
