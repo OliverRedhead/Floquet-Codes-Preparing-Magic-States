@@ -21,7 +21,7 @@ class CSSHoneycomb:
     
     T_ANCILLA_KEY = 0
 
-    def __init__(self, ncols : int = 5, nrows : int = 4, *, config_filepath: str | None = None) -> None:
+    def __init__(self, ncols : int = 5, nrows : int = 4, error_model: str | None = None, *, config_filepath: str | None = None) -> None:
         """
         Initialise CSSHoneycomb instance. Automatically generates vertices (and qubits) based on input nrows and ncols.
 
@@ -31,6 +31,8 @@ class CSSHoneycomb:
             number of rows of qubits
         ncols : int = 5
             number of columns of qubits
+        error_model : str | None = None
+            Path to an error-model JSON file. Defaults to error_model.json beside errors.py.
         config_filepath: str | None
             filepath to config, default None.
 
@@ -43,6 +45,7 @@ class CSSHoneycomb:
 
         self.nrows = nrows
         self.ncols = ncols
+        self.error_model = ErrorModel.load(error_model)
 
         self.vertices = self.__initialise_vertices()
         self.edges = self.__initialise_edges()
@@ -287,6 +290,15 @@ class CSSHoneycomb:
     def isg_tick(self) -> None:
         """increment isg clock"""
         self.isg_clock += 1
+        
+    def _all_qubit_keys(self) -> list[int]:
+        """Every data qubit and every ancilla in the circuit."""
+        return [v.key for v in self.vertices] + [e.ancilla.key for e in self.edges]
+
+    def _idle_keys(self, active) -> list[int]:
+        """Qubits that did not receive this layer's gate noise."""
+        acting = set(active)
+        return [key for key in self._all_qubit_keys() if key not in acting]
     
     # measurement protocol
 
@@ -650,27 +662,43 @@ class CSSHoneycomb:
         string += f"# prepare ancillas in {flavour} basis\nR "
         for a in ancilla_keys:
             string += str(a) + " "
+        string += "\n"
+        string += self.error_model.initialisation_error(ancilla_keys)
+        string += self.error_model.idling_error(self._idle_keys(ancilla_keys))
         string += self.tick()
         
         # If measuring X stabilizer, put ancillas in X basis
         if flavour == "X":
             string += "H "      # Hadamard
             for a in ancilla_keys:
-                string += str(a) + " "                
+                string += str(a) + " "
+            string += "\n"
+            string += self.error_model.hadamard_error(ancilla_keys)
+            string += self.error_model.idling_error(self._idle_keys(ancilla_keys))            
             string += self.tick()
 
         # First round of CNOTs between v0 and ancilla
         string += "# fold stabilizers\nCNOT "
+        first_pairs = []
         for edge in target_edges:
             c, t = CSSHoneycomb.__get_CNOTs(edge, flavour=flavour, r=0)
             string += f"{c} {t} "
+            first_pairs.extend((c, t))
+        string += "\n"
+        string += self.error_model.cnot_error(first_pairs)
+        string += self.error_model.idling_error(self._idle_keys(first_pairs))
         string += self.tick()
 
         # Second round of CNOTs between v1 and ancilla
         string += "CNOT "
+        second_pairs = []
         for edge in target_edges:
             c, t = CSSHoneycomb.__get_CNOTs(edge, flavour=flavour, r=1)
             string += f"{c} {t} "
+            second_pairs.extend((c, t))
+        string += "\n"
+        string += self.error_model.cnot_error(second_pairs)
+        string += self.error_model.idling_error(self._idle_keys(second_pairs))
         string += self.tick()
 
         # If measuring X stabilizer, put ancillas back in Z basis
@@ -678,6 +706,9 @@ class CSSHoneycomb:
             string += "# rotate ancillas back to Z basis\nH "
             for k in ancilla_keys + vertex_keys:
                 string += str(k) + " "
+            string += "\n"
+            string += self.error_model.hadamard_error(ancilla_keys)
+            string += self.error_model.idling_error(self._idle_keys(ancilla_keys))
             string += self.tick()
 
         # measure ancillas
@@ -809,9 +840,10 @@ class CSSHoneycomb:
         Returns
         -------
         circuit string : str
-            Reset instructions followed by a TICK, then (if a T qubit is
-            configured) the Bell pair between the T ancilla (key 0) and the
-            T qubit, again followed by a TICK.
+            Reset instructions, followed by initialisation and idling errors
+            and a TICK, then (if a T qubit is configured) the Bell pair
+            between the T ancilla (key 0) and the T qubit, again followed
+            by a TICK.
 
         Notes
         -----
@@ -821,6 +853,8 @@ class CSSHoneycomb:
           supports an X or Z plaquette.
         - The T ancilla is always reset in |0> (then H'd if a T qubit exists).
         - 'X' -> |+>, 'Y' -> |+i>, 'Z' -> |0>, 'T' -> |0> then Bell pair.
+        - Initialisation and idling errors are applied after the resets.
+          No errors are applied during the Bell pair preparation.
         """
         RESET_FOR_STATE = {"Z": "R", "X": "RX", "Y": "RY", "T": "R"}
 
@@ -866,13 +900,19 @@ class CSSHoneycomb:
             v.init = basis
             resets[RESET_FOR_STATE[basis]].append(v.key)
 
+        qubit_keys = [v.key for v in self.vertices]
+
         string = "# initialise qubits\n"
         for instruction, keys in resets.items():
             if keys:
                 string += f"{instruction} " + " ".join(map(str, keys)) + "\n"
+
+        # Errors on the reset (everything except the Bell pair below)
+        string += self.error_model.initialisation_error(qubit_keys)
+        string += self.error_model.idling_error(self._idle_keys(qubit_keys))
         string += self.tick()
 
-        # Bell pair between the T ancilla and the T qubit
+        # Bell pair between the T ancilla and the T qubit (noiseless)
         if t_key is not None:
             string += "# Bell pair: T ancilla <-> T qubit\n"
             string += f"H {CSSHoneycomb.T_ANCILLA_KEY}\n"
