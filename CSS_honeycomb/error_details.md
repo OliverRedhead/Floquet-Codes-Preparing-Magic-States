@@ -33,7 +33,7 @@ It is implemented by `ErrorModel.cnot_error`, which writes `DEPOLARIZE2(p_cnot)`
 
 Measurement error is the chance that the recorded measurement bit is flipped.
 
-It is implemented by `ErrorModel.measurement_error`, which writes `X_ERROR(p_measurement)` before a Z-basis measurement and `Z_ERROR(p_measurement)` before an X-basis measurement, using the `measurement_error` flag. `get_measurement` calls it immediately before `M` and `MX` / `MZ`. Ancillas are always measured with `M`, including in an X round, because the Hadamard has already changed their basis, so they take `X_ERROR`. A boundary `MZ` takes `X_ERROR`. A boundary `MX` takes `Z_ERROR`.
+It is implemented by `ErrorModel.measurement_error`, which writes `X_ERROR(p_measurement)` before a Z-basis measurement and `Z_ERROR(p_measurement)` before an X-basis measurement, using the `measurement_error` flag. `get_measurement` writes that `X_ERROR` immediately before `M`. Ancillas and boundary data qubits are both measured with `M`, including in an X round, because a Hadamard has already changed their basis, so both take `X_ERROR`. The Hadamard that restores the boundary qubits, and its Hadamard error, stay after `M`.
 
 ## Idling error
 
