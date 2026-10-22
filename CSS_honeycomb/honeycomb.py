@@ -717,6 +717,10 @@ class CSSHoneycomb:
             string += str(a) + " "
         
         # measure boundary data qubits (always in the Z basis)
+        
+        # this is to make sure errors added in correct order
+        # measure -> error -> hadamard -> error
+        hadamard_string = "" 
         if vertex_keys:
             string += f"\n#{colour}{flavour} boundary\nM "
             for v in vertex_keys:
@@ -724,18 +728,20 @@ class CSSHoneycomb:
 
             # undo the basis change so the qubits are back in the X basis
             if flavour == "X":
-                string += "\n# restore boundary qubits to X basis\nH "
+                hadamard_string += "\n# restore boundary qubits to X basis\nH "
                 for v in vertex_keys:
-                    string += str(v) + " "
-                string += "\n"
-                string += self.error_model.hadamard_error(vertex_keys)
+                    hadamard_string += str(v) + " "
+                hadamard_string += "\n"
+                hadamard_string += self.error_model.hadamard_error(vertex_keys)
                     
         string += "\n"
         string += self.error_model.measurement_error(ancilla_keys + vertex_keys, []) # empty list -> none in x_basis
         string += self.error_model.idling_error(self._idle_keys(ancilla_keys + vertex_keys))
+        
+        string += hadamard_string
             
                 
-        self.__record_measurements(colour, flavour, target_edges, target_vertices) # NOTE not sure if I need colour here
+        self.__record_measurements(colour, flavour, target_edges, target_vertices) 
         
         detectors = self.get_detectors()
         if self.isg_clock <= self._init_last_round:
