@@ -926,19 +926,24 @@ class CSSHoneycomb:
         return string
     
 
-    def _stabilizer_death(self, colour: str, flavour: str) -> int | None:
-        """First cycle index whose measurement anticommutes with this stabilizer.
+    def _init_readout_round(self, plaquette, flavour: str) -> int | None:
+        """First same-basis round that closes this plaquette, or None.
 
-        An opposite-flavour round kills the stabilizer when `SYNDOME_SCHEDULE`
-        names `colour` as the plaquette colour that opens or closes.
+        The prepared state fixes the parity of the first round of `flavour`
+        whose schedule names this plaquette colour. That parity is a detector
+        only when the round lists the colour as close. If the first mention
+        is an open, the repeating detector owns the check.
         """
-        opposite = "X" if flavour == "Z" else "Z"
+        if not self.measurement_cycle:
+            return None
         for t, (round_colour, round_flavour) in enumerate(self.measurement_cycle):
-            if round_flavour != opposite:
+            if round_flavour != flavour:
                 continue
             schedule = CSSHoneycomb.SYNDOME_SCHEDULE[(round_colour, round_flavour)]
-            if colour == schedule["close"]:
+            if plaquette.colour == schedule["close"]:
                 return t
+            if plaquette.colour == schedule["open"]:
+                return None
         return None
 
     def _plaquette_supports(self, plaquette, flavour: str) -> bool:
@@ -956,48 +961,32 @@ class CSSHoneycomb:
         stored = {}
         for plaquette in self.plaquettes:
             for flavour in ("X", "Z"):
+                if isinstance(plaquette, BoundaryPlaquette) and plaquette.flavour != flavour:
+                    continue
                 if not self._plaquette_supports(plaquette, flavour):
                     continue
-                death = self._stabilizer_death(plaquette.colour, flavour)
-                if death is None or not (0 < death):
+                round_index = self._init_readout_round(plaquette, flavour)
+                if round_index is None:
                     continue
                 stored[(plaquette.key, flavour)] = {
                     "plaquette": plaquette,
                     "flavour": flavour,
-                    "death": death,
+                    "round": round_index,
                     "emitted": False,
                 }
         self._init_last_round = max(
-            (spec["death"] - 1 for spec in stored.values()),
+            (spec["round"] for spec in stored.values()),
             default=-1,
         )
         return stored
 
-    def _readout_measurements(self, plaquette, flavour: str, death: int) -> list[Measurement]:
-        """One readout of this plaquette, taken in `flavour` before it is killed.
+    def _readout_measurements(self, plaquette, flavour: str, round_index: int) -> list[Measurement]:
+        """Measurements of this plaquette in `round_index`.
 
-        The readout is the latest round `t < death` whose flavour matches and
-        whose schedule names this plaquette colour as open or close. Only that
-        round's measurements are kept: edges of the colour measured then, and,
-        for a boundary plaquette, data qubits of the plaquette measured then.
-        An earlier round of the same check is left out, because a second
-        measurement cancels the prepared state out of the parity.
+        Edges of the colour measured that round, and, for a boundary
+        plaquette, its data qubits measured that round.
         """
-        round_index = None
-        round_colour = None
-        for t, (colour, round_flavour) in enumerate(self.measurement_cycle):
-            if t >= death:
-                break
-            if round_flavour != flavour:
-                continue
-            schedule = CSSHoneycomb.SYNDOME_SCHEDULE[(colour, round_flavour)]
-            if plaquette.colour not in (schedule["open"], schedule["close"]):
-                continue
-            round_index = t
-            round_colour = colour
-
-        if round_index is None:
-            return []
+        round_colour = self.measurement_cycle[round_index][0]
 
         times = []
         for m in self.measurements:
@@ -1027,10 +1016,10 @@ class CSSHoneycomb:
     def find_init_detectors(self) -> list[Detector]:
         """Detectors fixed by the prepared state, emitted once each.
 
-        The scan runs on the first round. A stabilizer that dies at step `t`
-        is stored then and written only when `isg_clock == t - 1`, so later
-        rounds do not construct it again. `get_measurement` stops calling
-        this once `isg_clock` passes the latest of those write rounds.
+        The scan runs on the first round. A stabilizer whose readout is
+        round `t` is written when `isg_clock == t`, including round 0.
+        `get_measurement` stops calling this once `isg_clock` passes the
+        latest of those rounds.
         """
         if not self.measurement_cycle:
             return []
@@ -1041,10 +1030,10 @@ class CSSHoneycomb:
 
         detectors = []
         for spec in self._init_detectors.values():
-            if spec["emitted"] or self.isg_clock != spec["death"] - 1:
+            if spec["emitted"] or self.isg_clock != spec["round"]:
                 continue
             records = self._readout_measurements(
-                spec["plaquette"], spec["flavour"], spec["death"]
+                spec["plaquette"], spec["flavour"], spec["round"]
             )
             if not records:
                 spec["emitted"] = True
