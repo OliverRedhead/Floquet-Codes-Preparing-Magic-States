@@ -45,7 +45,7 @@ class CSSHoneycomb:
 
         self.nrows = nrows
         self.ncols = ncols
-        self.error_model = ErrorModel.load(error_model)
+        self.error_model = ErrorModel.load(error_model, T_ancilla_key=CSSHoneycomb.T_ANCILLA_KEY)
 
         self.vertices = self.__initialise_vertices()
         self.edges = self.__initialise_edges()
@@ -727,6 +727,11 @@ class CSSHoneycomb:
                 string += "\n# restore boundary qubits to X basis\nH "
                 for v in vertex_keys:
                     string += str(v) + " "
+                    
+        # TODO check if we need errors for hadamards on vertices too
+        string += "\n"
+        string += self.error_model.measurement_error(ancilla_keys + vertex_keys, []) # empty list -> none in x_basis
+        string += self.error_model.idling_error(self._idle_keys(ancilla_keys + vertex_keys))
             
                 
         self.__record_measurements(colour, flavour, target_edges, target_vertices) # NOTE not sure if I need colour here
@@ -786,8 +791,7 @@ class CSSHoneycomb:
         if not open_pairs:
             return ""
 
-        string = self.tick()
-        string += "# final readout: measure out remaining ISG stabilizers\n"
+        string = "# final readout: measure out remaining ISG stabilizers\n"
 
         for p, d in open_pairs:
             qubits = [v.qubit for v in p.vertices]   # same iteration as get_MPPstring

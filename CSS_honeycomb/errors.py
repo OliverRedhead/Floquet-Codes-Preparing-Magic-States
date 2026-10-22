@@ -7,6 +7,8 @@ class ErrorModel:
 
     Each channel has its own probability and an on/off flag. A disabled
     channel, or a channel with no target qubits, contributes an empty string.
+    
+    We specify the T_ancilla_key as a qubit to never add errors to
     """
 
     REQUIRED_KEYS = (
@@ -22,25 +24,26 @@ class ErrorModel:
         "idling_error",
     )
 
-    def __init__(self, config: dict) -> None:
+    def __init__(self, config: dict, *, T_ancilla_key: int | None = None) -> None:
         missing = [key for key in self.REQUIRED_KEYS if key not in config]
         if missing:
             raise KeyError(f"error model config is missing keys: {missing}")
         self.config = config
+        self.T_ancilla_key = T_ancilla_key
 
     @classmethod
-    def load(cls, path: str | None = None) -> "ErrorModel":
+    def load(cls, path: str | None = None, *, T_ancilla_key : int | None = None) -> "ErrorModel":
         """Load an error model. Defaults to error_model.json beside this file."""
         config_path = Path(path) if path is not None else Path(__file__).with_name("error_model.json")
         with config_path.open() as handle:
-            return cls(json.load(handle))
+            return cls(json.load(handle), T_ancilla_key=T_ancilla_key)
 
     def _channel(self, instruction: str, probability_key: str, enabled_key: str, qubits) -> str:
         """Format one Stim noise instruction, or return an empty string."""
         if not self.config[enabled_key] or not qubits:
             return ""
         probability = self.config[probability_key]
-        targets = " ".join(str(qubit) for qubit in qubits)
+        targets = " ".join(str(qubit) for qubit in qubits if qubit != self.T_ancilla_key)
         return f"{instruction}({probability}) {targets}\n"
 
     def initialisation_error(self, qubits) -> str:
