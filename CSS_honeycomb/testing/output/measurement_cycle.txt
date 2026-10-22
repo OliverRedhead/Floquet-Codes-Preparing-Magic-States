@@ -1,99 +1,117 @@
 #redZ
 # prepare ancillas in Z basis
-R 23 25 27 29 34 36 38 40 46 
+R 24 26 28 30 35 37 39 41 47 
 TICK
 # fold stabilizers
-CNOT 23 0 25 2 27 3 29 5 34 8 36 10 38 12 40 13 46 18 
+CNOT 1 24 3 26 4 28 6 30 9 35 11 37 13 39 14 41 19 47 
 TICK
-CNOT 23 1 25 7 27 4 29 6 34 9 36 15 38 17 40 14 46 19 
+CNOT 2 24 8 26 5 28 7 30 10 35 16 37 18 39 15 41 20 47 
 TICK
 #redZ edges
-M 23 25 27 29 34 36 38 40 46 
+M 24 26 28 30 35 37 39 41 47 
 #redZ boundary
-MZ 20 21 
+M 21 22 
+
 tick
 #greenX
 # prepare ancillas in X basis
-R 22 24 31 33 35 37 42 44 47 
+R 23 25 32 34 36 38 43 45 48 
 TICK
-H 22 24 31 33 35 37 42 44 47 
+H 23 25 32 34 36 38 43 45 48 
 TICK
 # fold stabilizers
-CNOT 0 22 1 24 6 31 8 33 9 35 11 37 14 42 16 44 19 47 
+CNOT 23 1 25 2 32 7 34 9 36 10 38 12 43 15 45 17 48 20 
 TICK
-CNOT 5 22 2 24 7 31 13 33 10 35 12 37 15 42 21 44 20 47 
+CNOT 23 6 25 3 32 8 34 14 36 11 38 13 43 16 45 22 48 21 
 TICK
 # rotate ancillas back to Z basis
-H 22 24 31 33 35 37 42 44 47 
+H 23 25 32 34 36 38 43 45 48 5 18 
 TICK
 #greenX edges
-M 22 24 31 33 35 37 42 44 47 
+M 23 25 32 34 36 38 43 45 48 
 #greenX boundary
-MX 4 17 
+M 5 18 
+# restore boundary qubits to X basis
+H 5 18 
+
 tick
 #blueZ
 # prepare ancillas in Z basis
-R 26 28 30 32 39 41 43 45 48 
+R 27 29 31 33 40 42 44 46 49 
 TICK
 # fold stabilizers
-CNOT 26 2 28 4 30 6 32 7 39 12 41 14 43 15 45 17 48 20 
+CNOT 3 27 5 29 7 31 8 33 13 40 15 42 16 44 18 46 21 49 
 TICK
-CNOT 26 3 28 9 30 11 32 8 39 13 41 19 43 16 45 18 48 21 
+CNOT 4 27 10 29 12 31 9 33 14 40 20 42 17 44 19 46 22 49 
 TICK
 #blueZ edges
-M 26 28 30 32 39 41 43 45 48 
+M 27 29 31 33 40 42 44 46 49 
 #blueZ boundary
-MZ 0 1 
+M 1 2 
+
 tick
 #redX
 # prepare ancillas in X basis
-R 23 25 27 29 34 36 38 40 46 
+R 24 26 28 30 35 37 39 41 47 
 TICK
-H 23 25 27 29 34 36 38 40 46 
+H 24 26 28 30 35 37 39 41 47 
 TICK
 # fold stabilizers
-CNOT 0 23 2 25 3 27 5 29 8 34 10 36 12 38 13 40 18 46 
+CNOT 24 1 26 3 28 4 30 6 35 9 37 11 39 13 41 14 47 19 
 TICK
-CNOT 1 23 7 25 4 27 6 29 9 34 15 36 17 38 14 40 19 46 
+CNOT 24 2 26 8 28 5 30 7 35 10 37 16 39 18 41 15 47 20 
 TICK
 # rotate ancillas back to Z basis
-H 23 25 27 29 34 36 38 40 46 
+H 24 26 28 30 35 37 39 41 47 22 17 12 
 TICK
 #redX edges
-M 23 25 27 29 34 36 38 40 46 
+M 24 26 28 30 35 37 39 41 47 
 #redX boundary
-MX 16 11 21 
+M 22 17 12 
+# restore boundary qubits to X basis
+H 22 17 12 
+
 tick
 #greenZ
 # prepare ancillas in Z basis
-R 22 24 31 33 35 37 42 44 47 
+R 23 25 32 34 36 38 43 45 48 
 TICK
 # fold stabilizers
-CNOT 22 0 24 1 31 6 33 8 35 9 37 11 42 14 44 16 47 19 
+CNOT 1 23 2 25 7 32 9 34 10 36 12 38 15 43 17 45 20 48 
 TICK
-CNOT 22 5 24 2 31 7 33 13 35 10 37 12 42 15 44 21 47 20 
+CNOT 6 23 3 25 8 32 14 34 11 36 13 38 16 43 22 45 21 48 
 TICK
 #greenZ edges
-M 22 24 31 33 35 37 42 44 47 
+M 23 25 32 34 36 38 43 45 48 
 #greenZ boundary
-MZ 3 18 
+M 4 19 
+DETECTOR(1.0, 0.5, 28) rec[-56] rec[-55] rec[-53] rec[-11] rec[-10] rec[-9] 
+DETECTOR(4.0, 1.5, 28) rec[-52] rec[-51] rec[-49] rec[-8] rec[-7] rec[-5] 
+DETECTOR(4.25, 3.0, 28) rec[-48] rec[-47] rec[-3] rec[-1] 
+
 tick
 #blueX
 # prepare ancillas in X basis
-R 26 28 30 32 39 41 43 45 48 
+R 27 29 31 33 40 42 44 46 49 
 TICK
-H 26 28 30 32 39 41 43 45 48 
+H 27 29 31 33 40 42 44 46 49 
 TICK
 # fold stabilizers
-CNOT 2 26 4 28 6 30 7 32 12 39 14 41 15 43 17 45 20 48 
+CNOT 27 3 29 5 31 7 33 8 40 13 42 15 44 16 46 18 49 21 
 TICK
-CNOT 3 26 9 28 11 30 8 32 13 39 19 41 16 43 18 45 21 48 
+CNOT 27 4 29 10 31 12 33 9 40 14 42 20 44 17 46 19 49 22 
 TICK
 # rotate ancillas back to Z basis
-H 26 28 30 32 39 41 43 45 48 
+H 27 29 31 33 40 42 44 46 49 11 6 1 
 TICK
 #blueX edges
-M 26 28 30 32 39 41 43 45 48 
+M 27 29 31 33 40 42 44 46 49 
 #blueX boundary
-MX 10 5 0 
+M 11 6 1 
+# restore boundary qubits to X basis
+H 11 6 1 
+DETECTOR(2.0, 1.5, 33) rec[-55] rec[-54] rec[-52] rec[-10] rec[-9] rec[-8] 
+DETECTOR(5.0, 2.5, 33) rec[-51] rec[-50] rec[-49] rec[-7] rec[-6] rec[-4] 
+DETECTOR(4.25, 0.5, 33) rec[-53] rec[-48] rec[-11] rec[-3] 
+
 tick

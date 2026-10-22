@@ -328,13 +328,9 @@ class Detector(Operation):
         
     def get_pos(self):
         """Compute the detector position as the COM of its qubits."""
-<<<<<<< HEAD
         records = self.open_meas if self.open_meas else self.close_meas
         return np.mean([m.target.pos for m in records], axis=0)
-=======
-        return np.mean([m.target.pos for m in self.open_meas], axis=0)
     
     def is_closed(self) -> bool:
         return self.close_time is not None
->>>>>>> main
             

@@ -5,12 +5,9 @@ import numpy as np
 import stim
 
 from qubit_containers import Vertex, Edge, Plaquette, BoundaryPlaquette
-<<<<<<< HEAD
-from operations import Detector, Measurement
-=======
-from operations import Measurement, PauliString
+from operations import Detector, Measurement, PauliString
+from errors import ErrorModel
 
->>>>>>> main
 
 class CSSHoneycomb:
     """
@@ -63,7 +60,6 @@ class CSSHoneycomb:
         
         # This counts ISG updates
         self.isg_clock = 0
-<<<<<<< HEAD
 
         # Parsed (colour, flavour) rounds, in the order get_measurement will be called.
         self.measurement_cycle = None
@@ -72,7 +68,6 @@ class CSSHoneycomb:
         # Last isg_clock on which an initialisation detector is written.
         # Starts at 0 so the first round still runs the scan.
         self._init_last_round = 0
-=======
         
         # set config
         self.preparation = None
@@ -94,7 +89,6 @@ class CSSHoneycomb:
             }
         
     
->>>>>>> main
     
     def __initialise_vertices(self) -> list[Vertex]:
         """Initialise vertices, note that data qubits are initialised in this step too"""
@@ -789,7 +783,6 @@ class CSSHoneycomb:
         This function just takes the cycle (rX, gZ, bX, etc...) and 
         converts into a list of colours and flavours which can be read by the code
         """
-<<<<<<< HEAD
         parsed = []
         for token in cycle:
             colour = CSSHoneycomb._COLOUR_FROM_LETTER.get(token[0])
@@ -803,59 +796,90 @@ class CSSHoneycomb:
 
     def prepare_qubits(self, initialisation: dict | None = None) -> str:
         """
-        Prepare data qubits and record the basis each one was prepared in.
+        Prepare all qubits for the start of the circuit.
 
         Parameters
         ----------
         initialisation : dict | None
-            Map from vertex position `(x, y)` to `"X"`, `"Z"` or `"T"`.
-            With no map, every data qubit is prepared in `|0>` (`"Z"`).
+            Map from vertex position `(x, y)` to "X", "Y", "Z" or "T".
+            If None, falls back to the preparation loaded from the config
+            (`self.preparation`), and if that is also None every data qubit
+            is prepared in |0>.
 
-        Function takes the initialisation dictionary (from the json file) and initialises the qubits according to it
+        Returns
+        -------
+        circuit string : str
+            Reset instructions followed by a TICK, then (if a T qubit is
+            configured) the Bell pair between the T ancilla (key 0) and the
+            T qubit, again followed by a TICK.
+
+        Notes
+        -----
+        - Each data vertex gets `v.init` set to its basis; this is what
+          `_plaquette_supports` uses to find stabilizers fixed by the
+          prepared state. The T qubit has `v.init == "T"`, so it never
+          supports an X or Z plaquette.
+        - The T ancilla is always reset in |0> (then H'd if a T qubit exists).
+        - 'X' -> |+>, 'Y' -> |+i>, 'Z' -> |0>, 'T' -> |0> then Bell pair.
         """
-        init_by_pos = None
-        if initialisation is not None:
-            init_by_pos = {}
-            for pos, basis in initialisation.items():
-                if basis not in ("X", "Z", "T"):
-                    raise ValueError(
-                        f"initialisation of {pos} must be 'X', 'Z' or 'T', not {basis!r}"
-                    )
-                init_by_pos[tuple(pos)] = basis
+        RESET_FOR_STATE = {"Z": "R", "X": "RX", "Y": "RY", "T": "R"}
 
-        x_keys = []
-        z_keys = []
+        # Resolve everything to {qubit_key: basis}
+        if initialisation is not None:
+            init_by_key = {}
+            for pos, basis in initialisation.items():
+                key = self.qubit_coords.get(tuple(pos))
+                if key is None:
+                    raise ValueError(f"no data qubit at position {tuple(pos)}")
+                init_by_key[key] = basis
+        else:
+            init_by_key = self.preparation          # may be None
+
+        if init_by_key is not None:
+            for key, basis in init_by_key.items():
+                if basis not in RESET_FOR_STATE:
+                    raise ValueError(
+                        f"initialisation of qubit {key} must be one of "
+                        f"{sorted(RESET_FOR_STATE)}, not {basis!r}"
+                    )
+            t_keys = [k for k, s in init_by_key.items() if s == "T"]
+            if len(t_keys) > 1:
+                raise ValueError(f"Expected at most one T qubit, found {len(t_keys)}")
+            t_key = t_keys[0] if t_keys else None
+        else:
+            t_key = None
+
+        resets = {"R": [], "RX": [], "RY": []}
+
         for v in self.vertices:
-            if init_by_pos is None:
+            if v.key == CSSHoneycomb.T_ANCILLA_KEY:
+                resets["R"].append(v.key)           # ancilla always starts in |0>
+                continue
+
+            if init_by_key is None:
                 basis = "Z"
             else:
-                basis = init_by_pos.get(tuple(v.pos))
+                basis = init_by_key.get(v.key)
                 if basis is None:
                     raise ValueError(f"no initialisation for vertex at {v.pos}")
+
             v.init = basis
-            if basis == "X":
-                x_keys.append(v.key)
-            else:
-                z_keys.append(v.key)
+            resets[RESET_FOR_STATE[basis]].append(v.key)
 
-        if initialisation is None:
-            string = "# initialise qubits in |0>\nR "
-            for key in z_keys:
-                string += str(key) + " "
-            return string
+        string = "# initialise qubits\n"
+        for instruction, keys in resets.items():
+            if keys:
+                string += f"{instruction} " + " ".join(map(str, keys)) + "\n"
+        string += self.tick()
 
-        string = ""
-        if z_keys:
-            string += "# initialise qubits in |0>\nR "
-            for key in z_keys:
-                string += str(key) + " "
-        if x_keys:
-            if string:
-                string += "\n"
-            string += "# initialise qubits in |+>\nRX "
-            for key in x_keys:
-                string += str(key) + " "
+        # Bell pair between the T ancilla and the T qubit
+        if t_key is not None:
+            string += "# Bell pair: T ancilla <-> T qubit\n"
+            string += f"H {CSSHoneycomb.T_ANCILLA_KEY}\n"
+            string += f"CNOT {CSSHoneycomb.T_ANCILLA_KEY} {t_key}" + self.tick()
+
         return string
+    
 
     def _stabilizer_death(self, colour: str, flavour: str) -> int | None:
         """First cycle index whose measurement anticommutes with this stabilizer.
@@ -993,58 +1017,6 @@ class CSSHoneycomb:
             )
         return detectors
 
-=======
-        Prepare all qubits for the start of the circuit.
-
-        Every qubit is reset in the Z basis by default. If a preparation config
-        was loaded, qubits listed there are reset in the requested basis instead:
-        'X' -> |+>, 'Y' -> |+i>, 'Z' (or '0') -> |0>.
-
-        The qubit marked 'T' is reset to |0> and then entangled with the T
-        ancilla (key 0) in a Bell pair: H on the ancilla, then CNOT
-        ancilla -> T qubit. This gives (|00> + |11>)/sqrt(2).
-
-        Returns
-        -------
-        circuit string : str
-            Stim reset instructions, followed by the Bell pair circuit if a T
-            qubit is configured, each layer ending in a TICK.
-        """
-        RESET_FOR_STATE = {"Z": "R", "X": "RX", "Y": "RY", "T": "R"}
-
-        resets = {"R": [], "RX": [], "RY": []}
-        t_key = None
-
-        if self.preparation is None:
-            resets["R"] = [v.key for v in self.vertices]
-        else:
-
-            t_keys = [k for k, s in self.preparation.items() if s == "T"]
-            if len(t_keys) != 1:
-                raise ValueError(f"Expected exactly one T qubit, found {len(t_keys)}")
-            t_key = t_keys[0]
-
-            for v in self.vertices:
-                state = self.preparation.get(v.key, "Z")
-                if state not in RESET_FOR_STATE:
-                    raise ValueError(f"Unknown preparation state {state!r} on qubit {v.key}")
-                resets[RESET_FOR_STATE[state]].append(v.key)
-
-        string = "# initialise qubits\n"
-        for instruction, keys in resets.items():
-            if keys:
-                string += f"{instruction} " + " ".join(map(str, keys)) + "\n"
-        string += self.tick()
-
-        # Bell pair between the T ancilla and the T qubit
-        if t_key is not None:
-            string += "# Bell pair: T ancilla <-> T qubit\n"
-            string += f"H {CSSHoneycomb.T_ANCILLA_KEY}\n"
-            string += f"CNOT {CSSHoneycomb.T_ANCILLA_KEY} {t_key}" + self.tick()
-
-        return string
-        
->>>>>>> main
 
     """
     helper methods
