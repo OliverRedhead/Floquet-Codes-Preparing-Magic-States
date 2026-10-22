@@ -8,11 +8,14 @@ Each qubit gets one channel per layer. Qubits that took the layer's gate receive
 
 ## Initialisation error
 
-Initialisation error is the chance that a qubit reset to `|0⟩` is prepared in `|1⟩` instead.
+Initialisation error is one fault on a qubit that was just prepared, with probability `p_initialisation`. The Pauli depends on the prepared state, because only a Pauli that takes that state to an orthogonal one is a real fault.
 
-It is implemented by `ErrorModel.initialisation_error`, which writes `X_ERROR(p_initialisation)` using the `initialisation_error` flag. `get_measurement` calls it after the ancilla `R` and before `tick`. `prepare_qubits` calls it after the data-qubit `R`.
+It is implemented by `ErrorModel.initialisation_error`, using the `initialisation_error` flag. `get_measurement` calls it after the ancilla `R` and before `tick`. Those ancillas are always reset into `|0⟩`, so they take `X_ERROR`. `prepare_qubits` calls it after the data-qubit resets, and again after the Bell pair for the T qubit.
 
-Every reset in the circuit is currently `R` into `|0⟩`, so this channel is only an X error. Later state preparation has to change that. A qubit prepared in the X basis needs a `Z_ERROR` after that preparation, and the injected T qubit needs `DEPOLARIZE1`, because all three Paulis are distinct on `|T⟩`. A Y error is not a separate fault on a Clifford preparation: on `|0⟩` it is the same state as X, and on `|+⟩` it is the same state as Z.
+- `|0⟩`, from `R`: `X_ERROR`. This prepares `|1⟩` instead. A Y error is the same state.
+- `|+⟩`, from `RX`: `Z_ERROR`. This prepares `|-⟩` instead. An X error does nothing to `|+⟩`.
+- `|+i⟩`, from `RY`: `X_ERROR`. X and Z both take `|+i⟩` to `|-i⟩`. A Y error leaves `|+i⟩` unchanged.
+- T data qubit: `DEPOLARIZE1` after the Bell pair, not after the `|0⟩` reset. Before the pair the qubit is still `|0⟩`, so X and Y are the same fault. After `H` on the T ancilla and `CNOT` onto the T data qubit, X, Y, and Z flip different correlations with the ancilla. Each Pauli has probability `p_initialisation / 3`. The Bell gates themselves are noiseless, and the T ancilla is left out of every channel.
 
 ## Hadamard error
 
