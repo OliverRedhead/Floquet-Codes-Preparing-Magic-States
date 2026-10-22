@@ -707,8 +707,8 @@ class CSSHoneycomb:
             for k in ancilla_keys + vertex_keys:
                 string += str(k) + " "
             string += "\n"
-            string += self.error_model.hadamard_error(ancilla_keys)
-            string += self.error_model.idling_error(self._idle_keys(ancilla_keys))
+            string += self.error_model.hadamard_error(ancilla_keys + vertex_keys)
+            string += self.error_model.idling_error(self._idle_keys(ancilla_keys + vertex_keys))
             string += self.tick()
 
         # measure ancillas
@@ -727,8 +727,9 @@ class CSSHoneycomb:
                 string += "\n# restore boundary qubits to X basis\nH "
                 for v in vertex_keys:
                     string += str(v) + " "
+                string += "\n"
+                string += self.error_model.hadamard_error(vertex_keys)
                     
-        # TODO check if we need errors for hadamards on vertices too
         string += "\n"
         string += self.error_model.measurement_error(ancilla_keys + vertex_keys, []) # empty list -> none in x_basis
         string += self.error_model.idling_error(self._idle_keys(ancilla_keys + vertex_keys))
