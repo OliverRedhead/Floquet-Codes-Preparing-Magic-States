@@ -711,6 +711,9 @@ class CSSHoneycomb:
             string += self.error_model.idling_error(self._idle_keys(ancilla_keys + vertex_keys))
             string += self.tick()
 
+        # Flip the recorded bit. Both ancillas and boundary qubits are measured with M.
+        string += self.error_model.measurement_error(ancilla_keys + vertex_keys, [])
+
         # measure ancillas
         string += f"#{colour}{flavour} edges\nM "
         for a in ancilla_keys:
@@ -731,7 +734,6 @@ class CSSHoneycomb:
                 string += self.error_model.hadamard_error(vertex_keys)
                     
         string += "\n"
-        string += self.error_model.measurement_error(ancilla_keys + vertex_keys, []) # empty list -> none in x_basis
         string += self.error_model.idling_error(self._idle_keys(ancilla_keys + vertex_keys))
             
                 
