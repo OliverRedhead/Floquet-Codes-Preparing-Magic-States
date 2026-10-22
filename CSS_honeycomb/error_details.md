@@ -18,7 +18,7 @@ Every reset in the circuit is currently `R` into `|0⟩`, so this channel is onl
 
 Hadamard error is the chance that a qubit suffers a random X, Y, or Z after a Hadamard. Each Pauli has probability `p_hadamard / 3`.
 
-It is implemented by `ErrorModel.hadamard_error`, which writes `DEPOLARIZE1(p_hadamard)` using the `hadamard_error` flag. `get_measurement` calls it after both Hadamard blocks in an X round: the block that puts ancillas into the X basis, and the block that rotates them back. A Z round has no Hadamard, so it has no Hadamard error.
+It is implemented by `ErrorModel.hadamard_error`, which writes `DEPOLARIZE1(p_hadamard)` using the `hadamard_error` flag. `get_measurement` calls it after every Hadamard in an X round. The block that puts ancillas into the X basis covers the ancillas only. The block that rotates them back also Hadamards the boundary data qubits, and those qubits take the same channel and are left out of that layer's idle noise. The Hadamard that restores those data qubits after the measurement takes the channel again. A Z round has no Hadamard, so it has no Hadamard error.
 
 ## CNOT error
 
