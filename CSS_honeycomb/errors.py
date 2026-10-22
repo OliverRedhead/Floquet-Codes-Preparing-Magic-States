@@ -46,9 +46,19 @@ class ErrorModel:
         targets = " ".join(str(qubit) for qubit in qubits if qubit != self.T_ancilla_key)
         return f"{instruction}({probability}) {targets}\n"
 
-    def initialisation_error(self, qubits) -> str:
-        """X_ERROR after a reset into |0>."""
-        return self._channel("X_ERROR", "p_initialisation", "initialisation_error", qubits)
+    def initialisation_error(self, z_basis, x_basis=(), y_basis=(), t_basis=()) -> str:
+        """Preparation noise matched to the state that was just prepared.
+
+        |0> takes X_ERROR, |+> takes Z_ERROR, and |+i> takes X_ERROR (Y leaves
+        |+i> unchanged). The T data qubit takes DEPOLARIZE1, because X, Y, and
+        Z are distinct once it is entangled with the reference ancilla.
+        """
+        return (
+            self._channel("X_ERROR", "p_initialisation", "initialisation_error", z_basis)
+            + self._channel("Z_ERROR", "p_initialisation", "initialisation_error", x_basis)
+            + self._channel("X_ERROR", "p_initialisation", "initialisation_error", y_basis)
+            + self._channel("DEPOLARIZE1", "p_initialisation", "initialisation_error", t_basis)
+        )
 
     def hadamard_error(self, qubits) -> str:
         """DEPOLARIZE1 on qubits that just received a Hadamard."""

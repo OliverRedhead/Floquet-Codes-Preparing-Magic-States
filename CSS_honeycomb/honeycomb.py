@@ -846,8 +846,8 @@ class CSSHoneycomb:
         circuit string : str
             Reset instructions, followed by initialisation and idling errors
             and a TICK, then (if a T qubit is configured) the Bell pair
-            between the T ancilla (key 0) and the T qubit, again followed
-            by a TICK.
+            between the T ancilla (key 0) and the T qubit, a depolarizing
+            error on the T data qubit, and a TICK.
 
         Notes
         -----
@@ -857,8 +857,11 @@ class CSSHoneycomb:
           supports an X or Z plaquette.
         - The T ancilla is always reset in |0> (then H'd if a T qubit exists).
         - 'X' -> |+>, 'Y' -> |+i>, 'Z' -> |0>, 'T' -> |0> then Bell pair.
-        - Initialisation and idling errors are applied after the resets.
-          No errors are applied during the Bell pair preparation.
+        - After the resets, |0> takes X_ERROR, |+> takes Z_ERROR, and |+i>
+          takes X_ERROR. The T data qubit is left out of that layer.
+        - The Bell gates themselves are noiseless. DEPOLARIZE1 is applied to
+          the T data qubit after the CNOT, before the TICK. The T ancilla
+          is excluded from every channel.
         """
         RESET_FOR_STATE = {"Z": "R", "X": "RX", "Y": "RY", "T": "R"}
 
@@ -911,16 +914,21 @@ class CSSHoneycomb:
             if keys:
                 string += f"{instruction} " + " ".join(map(str, keys)) + "\n"
 
-        # Errors on the reset (everything except the Bell pair below)
-        string += self.error_model.initialisation_error(qubit_keys)
+        # Clifford preparation noise. The T data qubit is still |0> here,
+        # so its noise is applied after the Bell pair instead.
+        z_keys = [key for key in resets["R"] if key != t_key]
+        string += self.error_model.initialisation_error(z_keys, resets["RX"], resets["RY"])
         string += self.error_model.idling_error(self._idle_keys(qubit_keys))
         string += self.tick()
 
-        # Bell pair between the T ancilla and the T qubit (noiseless)
+        # Bell pair between the T ancilla and the T qubit. The gates are
+        # noiseless; the injected qubit is depolarized once the pair exists.
         if t_key is not None:
             string += "# Bell pair: T ancilla <-> T qubit\n"
             string += f"H {CSSHoneycomb.T_ANCILLA_KEY}\n"
-            string += f"CNOT {CSSHoneycomb.T_ANCILLA_KEY} {t_key}" + self.tick()
+            string += f"CNOT {CSSHoneycomb.T_ANCILLA_KEY} {t_key}\n"
+            string += self.error_model.initialisation_error((), t_basis=[t_key])
+            string += self.tick()
 
         return string
     
