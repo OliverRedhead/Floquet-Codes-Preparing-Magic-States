@@ -1,1 +1,1 @@
-{"p_initialisation": 0.0001, "initialisation_error": true, "p_hadamard": 0.0001, "hadamard_error": true, "p_cnot": 0.0001, "cnot_error": true, "p_measurement": 0.0001, "measurement_error": true, "p_idling": 0.0001, "idling_error": true}
+{"p_initialisation": 0.01, "initialisation_error": true, "p_hadamard": 0.01, "hadamard_error": true, "p_cnot": 0.01, "cnot_error": true, "p_measurement": 0.01, "measurement_error": true, "p_idling": 0.01, "idling_error": true}
