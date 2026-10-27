@@ -708,7 +708,7 @@ class CSSHoneycomb:
         string += "# fold stabilizers\nCNOT "
         first_pairs = []
         for edge in target_edges:
-            c, t = CSSHoneycomb.__get_CNOTs(edge, flavour=flavour, r=0)
+            c, t = CSSHoneycomb.__get_CNOTs(edge, flavour=flavour, r=1)
             string += f"{c} {t} "
             first_pairs.extend((c, t))
         string += "\n"
@@ -720,7 +720,7 @@ class CSSHoneycomb:
         string += "CNOT "
         second_pairs = []
         for edge in target_edges:
-            c, t = CSSHoneycomb.__get_CNOTs(edge, flavour=flavour, r=1)
+            c, t = CSSHoneycomb.__get_CNOTs(edge, flavour=flavour, r=0)
             string += f"{c} {t} "
             second_pairs.extend((c, t))
         string += "\n"
