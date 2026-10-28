@@ -959,6 +959,7 @@ class CSSHoneycomb:
         # so its noise is applied after the Bell pair instead.
         z_keys = [key for key in resets["R"] if key != t_key]
         string += self.error_model.initialisation_error(z_keys, resets["RX"], resets["RY"])
+        string += self.error_model.initialisation_error((), t_basis=[t_key])
         string += self.error_model.idling_error(self._idle_keys(qubit_keys))
         string += self.tick()
 
@@ -968,7 +969,6 @@ class CSSHoneycomb:
             string += "# Bell pair: T ancilla <-> T qubit\n"
             string += f"H {CSSHoneycomb.T_ANCILLA_KEY}\n"
             string += f"CNOT {CSSHoneycomb.T_ANCILLA_KEY} {t_key}\n"
-            string += self.error_model.initialisation_error((), t_basis=[t_key])
             string += self.tick()
 
         return string
