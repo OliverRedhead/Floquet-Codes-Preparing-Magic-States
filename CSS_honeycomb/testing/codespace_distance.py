@@ -56,13 +56,13 @@ def _measurement_rounds(honey: CSSHoneycomb, cycle: tuple[str, ...]) -> str:
     return string
 
 
-def build_circuit() -> stim.Circuit:
+def build_circuit(*, ncols=5, nrows=3, config="5x3.json") -> stim.Circuit:
     """Ideal injection, then one noisy six-round cycle, then a noiseless readout."""
     honey = CSSHoneycomb(
-        ncols=5,
-        nrows=3,
+        ncols=ncols,
+        nrows=nrows,
         error_model=str(ROOT / "error_model.json"),
-        config_filepath=str(ROOT / "config" / "5x3.json"),
+        config_filepath=str(ROOT / "config" / config),
     )
     honey.set_measurement_cycle([*IDEAL, *NOISY])
 
