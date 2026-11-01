@@ -8,5 +8,5 @@
     "p_measurement": 0.0001,
     "measurement_error": true,
     "p_idling": 0.0001,
-    "idling_error": false
+    "idling_error": true
 }

@@ -111,7 +111,7 @@ class PhenomenologicalHoneycomb(CSSHoneycomb):
 
         data_keys = [v.key for v in self.vertices if v.key != CSSHoneycomb.T_ANCILLA_KEY]
         string += self.error_model.data_error(data_keys)
-
+        
         targets = [
             f"{flavour}{e.vertices[0].key}*{flavour}{e.vertices[1].key}"
             for e in target_edges
@@ -198,11 +198,11 @@ def _build_rounds(sim: PhenomenologicalHoneycomb, cycle: list[str], initialisati
 
 def build_phenomenological_circuit(
     cycle: list[str],
-    *,
     noise: PhenomenologicalNoise,
+    *,
     ncols: int = 5,
-    nrows: int = 4,
-    config_filepath: str | None = None,
+    nrows: int = 3,
+    config_filepath: str | None = "config/5x3.json",
     initialisation: dict | None = None,
     observables: bool = True,
     final_readout: bool = True,
