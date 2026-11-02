@@ -482,7 +482,7 @@ class CSSHoneycomb:
         if recs is None:
             raise ValueError(
                 "Pauli string is not a logical of the state at this point. "
-                "Check the logical_schedule entry for the last measured round."
+                f"Check the logical_schedule entry for the last measured round."
             )
 
         n = circuit.num_measurements

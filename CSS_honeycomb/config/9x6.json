@@ -1,0 +1,95 @@
+{
+    "name": "surface_d6",
+    "qubits": [
+        {"pos": [0, 0], "init": "Z"},
+        {"pos": [1, 0], "init": "Z"},
+        {"pos": [2, 0], "init": "Z"},
+        {"pos": [3, 0], "init": "Z"},
+        {"pos": [4, 0], "init": "Z"},
+        {"pos": [5, 0], "init": "Z"},
+        {"pos": [6, 0], "init": "Z"},
+        {"pos": [7, 0], "init": "Z"},
+        {"pos": [8, 0], "init": "X"},
+
+        {"pos": [0, 1], "init": "X"},
+        {"pos": [1, 1], "init": "X"},
+        {"pos": [2, 1], "init": "X"},
+        {"pos": [3, 1], "init": "X"},
+        {"pos": [4, 1], "init": "Z"},
+        {"pos": [5, 1], "init": "Z"},
+        {"pos": [6, 1], "init": "Z"},
+        {"pos": [7, 1], "init": "X"},
+        {"pos": [8, 1], "init": "X"},
+        {"pos": [9, 1], "init": "X"},
+
+        {"pos": [1, 2], "init": "X"},
+        {"pos": [2, 2], "init": "X"},
+        {"pos": [3, 2], "init": "X"},
+        {"pos": [4, 2], "init": "X"},
+        {"pos": [5, 2], "init": "T"},
+        {"pos": [6, 2], "init": "X"},
+        {"pos": [7, 2], "init": "X"},
+        {"pos": [8, 2], "init": "X"},
+        {"pos": [9, 2], "init": "X"},
+        {"pos": [10, 2], "init": "X"},
+
+        {"pos": [2, 3], "init": "X"},
+        {"pos": [3, 3], "init": "X"},
+        {"pos": [4, 3], "init": "X"},
+        {"pos": [5, 3], "init": "Z"},
+        {"pos": [6, 3], "init": "Z"},
+        {"pos": [7, 3], "init": "Z"},
+        {"pos": [8, 3], "init": "X"},
+        {"pos": [9, 3], "init": "X"},
+        {"pos": [10, 3], "init": "X"},
+        {"pos": [11, 3], "init": "X"},
+
+        {"pos": [3, 4], "init": "X"},
+        {"pos": [4, 4], "init": "Z"},
+        {"pos": [5, 4], "init": "Z"},
+        {"pos": [6, 4], "init": "Z"},
+        {"pos": [7, 4], "init": "Z"},
+        {"pos": [8, 4], "init": "Z"},
+        {"pos": [9, 4], "init": "Z"},
+        {"pos": [10, 4], "init": "Z"},
+        {"pos": [11, 4], "init": "Z"},
+        {"pos": [12, 4], "init": "Z"},
+
+        {"pos": [4, 5], "init": "Z"},
+        {"pos": [5, 5], "init": "Z"},
+        {"pos": [6, 5], "init": "Z"},
+        {"pos": [7, 5], "init": "Z"},
+        {"pos": [8, 5], "init": "Z"},
+        {"pos": [9, 5], "init": "Z"},
+        {"pos": [10, 5], "init": "Z"},
+        {"pos": [11, 5], "init": "Z"},
+        {"pos": [12, 5], "init": "Z"}
+    ],
+    
+    "logical_schedule": {
+        "rXX" : {
+            "X_logical" : [],
+            "Z_logical" : []
+        },
+        "gZZ" : {
+            "X_logical" : [],
+            "Z_logical" : []
+        },
+        "bXX" : {
+            "X_logical" : [[3, 3], [4, 3], [6, 3], [7, 3], [9, 3], [10, 3]],
+            "Z_logical" : [[7, 0], [7, 1], [7, 2], [7, 3], [7, 4], [7, 5]]
+        },
+        "rZZ" : {
+            "X_logical" : [],
+            "Z_logical" : []
+        },
+        "gXX" : {
+            "X_logical" : [],
+            "Z_logical" : []
+        },
+        "bZZ" : {
+            "X_logical" : [[2, 2], [3, 2], [5, 2], [6, 2], [8, 2], [9, 2]],
+            "Z_logical" : [[5, 0], [5, 1], [5, 2], [5, 3], [5, 4], [5, 5]]
+        }
+    }
+}
